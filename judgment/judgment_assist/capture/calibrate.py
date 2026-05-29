@@ -24,15 +24,17 @@ import os
 from .screen import ScreenGrabber, _HAVE_DEPS
 
 # Regions to mark per game. kind: "single" -> one box, "multi" -> many boxes.
+# Blackjack uses rank-only templates, so its ROIs target the RANK GLYPH in each
+# card's corner (suit-agnostic). Poker needs full cards, so it boxes whole cards.
 SPECS = {
     "blackjack": [
-        ("dealer_upcard", "single", "dealer's face-up card"),
-        ("player_cards", "multi", "each of YOUR card positions"),
-        ("dealer_cards", "multi", "each DEALER card position (optional, for counting)"),
+        ("dealer_upcard", "single", "the RANK in the corner of the dealer's face-up card"),
+        ("player_cards", "multi", "the RANK in the corner of each of YOUR cards"),
+        ("dealer_cards", "multi", "the RANK corner of each DEALER card (optional, for counting)"),
     ],
     "poker": [
-        ("hole_cards", "multi", "your TWO hole cards"),
-        ("board_cards", "multi", "all FIVE community card positions"),
+        ("hole_cards", "multi", "your TWO hole cards (whole card)"),
+        ("board_cards", "multi", "all FIVE community card positions (whole card)"),
     ],
 }
 
@@ -130,18 +132,41 @@ def cmd_mark(a):
 
 def cmd_templates(a):
     import cv2
+    from ..cards import parse_card, card_str, RANK_TO_INT
+
+    if a.mode == "rank":
+        hint = "rank (A K Q J T 9..2; blank=skip)"
+        unit = "rank glyph (the card's corner)"
+
+        def canon(raw):
+            r = raw.strip().upper()
+            if r not in RANK_TO_INT:
+                raise ValueError(r)
+            return r
+    else:
+        hint = "card (e.g. As, Td, 9c; blank=skip)"
+        unit = "card"
+
+        def canon(raw):
+            return card_str(parse_card(raw))  # raises ValueError on bad input
+
     frame = _grab_base(a.monitor, a.window)
-    print("Drag a box around each visible card (ENTER between, ESC/empty to finish).")
+    print(f"Drag a box around each {unit} (ENTER between, ESC/empty to finish).")
     boxes = cv2.selectROIs("templates", frame, showCrosshair=False)
     cv2.destroyAllWindows()
     saved = 0
     for (x, y, w, h) in boxes:
         crop = frame[y:y + h, x:x + w]
-        cv2.imshow("name this card (focus this window, then type in the terminal)", crop)
+        cv2.imshow("name this (focus this window, then type in the terminal)", crop)
         cv2.waitKey(300)
-        name = input("  card (e.g. As, Td, 9c; blank=skip): ").strip()
+        raw = input(f"  {hint}: ").strip()
         cv2.destroyAllWindows()
-        if not name:
+        if not raw:
+            continue
+        try:
+            name = canon(raw)
+        except ValueError:
+            print(f"    '{raw}' is not a valid {a.mode}; skipped")
             continue
         _imwrite(os.path.join(a.out, name + ".png"), crop)
         saved += 1
@@ -175,6 +200,8 @@ def main(argv=None):
     m.add_argument("--out", default="config/regions.json"); m.set_defaults(func=cmd_mark)
 
     t = sub.add_parser("templates"); add_source(t)
+    t.add_argument("--mode", choices=["card", "rank"], default="card",
+                   help="rank = 13 corner glyphs (blackjack); card = full 52 (poker)")
     t.add_argument("--out", default="data/templates"); t.set_defaults(func=cmd_templates)
 
     a = p.parse_args(argv)

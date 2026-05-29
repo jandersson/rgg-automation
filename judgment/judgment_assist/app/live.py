@@ -51,20 +51,16 @@ def resolve_base(cfg):
     return None
 
 
-def _ranks_str(cards):
-    return " ".join(INT_TO_RANK[c[0]] for c in cards)
-
-
 def blackjack_text(rec, frame, roi_cfg, advisor):
+    # rank-mode recogniser: recognize_many returns rank ints directly.
     up = rec.recognize_many(frame, [roi_cfg["dealer_upcard"]])
-    hand = rec.recognize_many(frame, roi_cfg.get("player_cards", []))
-    if not hand or not up:
+    ranks = rec.recognize_many(frame, roi_cfg.get("player_cards", []))
+    if not ranks or not up:
         return "blackjack: waiting for cards..."
-    ranks = [c[0] for c in hand]
     total, soft = hand_total(ranks)
-    dec = advisor.advise(ranks, up[0][0])
-    return (f"YOU {_ranks_str(hand)} = {total}{' soft' if soft else ''}\n"
-            f"DLR {INT_TO_RANK[up[0][0]]}\n"
+    dec = advisor.advise(ranks, up[0])
+    return (f"YOU {' '.join(INT_TO_RANK[r] for r in ranks)} = {total}{' soft' if soft else ''}\n"
+            f"DLR {INT_TO_RANK[up[0]]}\n"
             f">>> {dec.action.upper()}  ({dec.reason})")
 
 
@@ -87,7 +83,8 @@ def run(a):
     if not roi_cfg:
         raise SystemExit(f"no '{a.game}' section in {a.config} — run calibration first")
 
-    rec = CardRecognizer(a.templates, min_confidence=a.min_confidence)
+    mode = a.mode if a.mode != "auto" else ("rank" if a.game == "blackjack" else "card")
+    rec = CardRecognizer(a.templates, mode=mode, min_confidence=a.min_confidence)
     advisor = BlackjackAdvisor(Rules(decks=a.decks, hit_soft_17=a.h17)) if a.game == "blackjack" else None
 
     overlay = None
@@ -123,6 +120,8 @@ def main(argv=None):
     p.add_argument("game", choices=["blackjack", "poker"])
     p.add_argument("--config", default="config/regions.json")
     p.add_argument("--templates", default="data/templates")
+    p.add_argument("--mode", choices=["auto", "card", "rank"], default="auto",
+                   help="template type; auto = rank for blackjack, card for poker")
     p.add_argument("--interval", type=float, default=0.7, help="seconds between reads")
     p.add_argument("--min-confidence", dest="min_confidence", type=float, default=0.6)
     p.add_argument("--no-overlay", action="store_true", help="print to console instead")
