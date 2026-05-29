@@ -25,21 +25,43 @@ same card is pixel-identical every time. Normalised cross-correlation
 no training, and is near-100% reliable once calibrated. We capture the template
 library once from the running game (calibration step).
 
+## Decisions (2026-05-29)
+
+- **Source: PC Steam, borderless/windowed.** Capture targets the game window by
+  title (`capture/window.py`), so ROIs survive the window being moved.
+- **Advice/overlay only** for now. Phase 4 input automation is intentionally
+  deferred — a misread card should never cost chips. The overlay just *shows*
+  the best move; you press the buttons.
+
 ## Build phases
 
 - [x] **Phase 0 — repo + brains.** Card primitives, poker evaluator + equity +
   advisor, blackjack basic strategy + Hi-Lo counting + Six-Card-Charlie-aware
-  engine. Unit-tested, no game required.
-- [ ] **Phase 1 — capture + calibration.** `mss` region grabber; a calibration
-  CLI that screenshots the game, lets you mark the card regions (ROIs) for each
-  minigame, and crops the reference template library.
-- [ ] **Phase 2 — vision + manual CLI.** `cv2.matchTemplate` recogniser wired to
-  the ROIs; a manual CLI (type your cards, get advice) usable before vision is
-  calibrated.
-- [ ] **Phase 3 — live advisor loop.** Capture → recognise → advise → on-screen
-  overlay (transparent always-on-top window) or console, updating per frame.
-- [ ] **Phase 4 (optional, PC only) — input automation.** Blackjack auto-play by
-  sending inputs to the game window. Poker stays advice-only by request.
+  engine. Unit-tested (23 tests), no game required.
+- [x] **Phase 1 — capture + calibration.** `mss` region grabber, Win32 window
+  finder, and a calibration CLI: `windows` / `snapshot` / interactive `mark`
+  (drag boxes around the card regions) / `templates` (build the reference card
+  library) / manual `crop`.
+- [x] **Phase 2 — vision + manual CLI.** `cv2.matchTemplate` recogniser
+  (`vision/recognizer.py`) and a manual advisor CLI (`app/cli.py`, type cards →
+  advice) usable with zero calibration.
+- [x] **Phase 3 — live advisor loop.** `app/live.py`: capture → recognise →
+  advise → always-on-top tkinter overlay (or `--no-overlay` console). *Runs once
+  calibration (templates + ROIs) is done against the live game.*
+- [ ] **Phase 4 (deferred) — input automation.** Out of scope by choice; would
+  add blackjack auto-play via input injection to the (PC) game window.
+
+## Remaining to use it live
+
+The code is done; what's left needs the game on screen (one-time, ~10 min):
+1. `calibrate windows` → find Judgment's window title.
+2. `calibrate templates --window Judgment` → crop one clean copy of every
+   rank+suit into `data/templates/` (collect across a few hands/games).
+3. `calibrate mark --game blackjack --window Judgment` and `--game poker` → drag
+   boxes around the card slots; writes `config/regions.json`.
+4. `py -m judgment_assist.app.live blackjack` (or `poker`) → overlay shows the
+   play. Auto card-counting across hands and chip-count OCR are the next code
+   steps once the read is proven reliable.
 
 ## Open empirical questions (the tool will answer these)
 

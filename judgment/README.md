@@ -35,8 +35,34 @@ py -m pip install -r requirements.txt        # for tests you only need pytest
 py -m pytest                                  # run the logic tests
 ```
 
-Manual advisor CLI (poker / blackjack) lands with the capture layer — see
-[ARCHITECTURE.md](ARCHITECTURE.md) for the build phases.
+## Manual advisor (works now — no capture)
+
+```powershell
+$env:PYTHONPATH = "C:\Users\jonaS\dev\jonas\rgg-automation\judgment"
+
+# blackjack: your hand vs dealer up-card (--seen feeds the count)
+py -m judgment_assist.app.cli blackjack --hand "T 6" --dealer T
+
+# poker (Hold'em): hole cards, board, opponents, pot, cost-to-call
+py -m judgment_assist.app.cli poker --hole "Ah Kh" --board "Qh 7h 2h" --opp 2
+```
+
+Both also run as interactive REPLs (omit `--hand` / `--hole`).
+
+## Live overlay (needs one-time calibration vs the running game)
+
+Source is **PC Steam, borderless/windowed**; advice/overlay only (no inputs are
+sent to the game). With Judgment open on the blackjack/poker table:
+
+```powershell
+py -m judgment_assist.capture.calibrate windows                     # find the title
+py -m judgment_assist.capture.calibrate templates --window Judgment # build card library
+py -m judgment_assist.capture.calibrate mark --game blackjack --window Judgment
+py -m judgment_assist.app.live blackjack                            # overlay shows the play
+```
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full calibration walkthrough and
+the build-phase status.
 
 ## Layout
 
