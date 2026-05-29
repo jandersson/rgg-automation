@@ -55,11 +55,16 @@ Source is **PC Steam, borderless/windowed**; advice/overlay only (no inputs are
 sent to the game). With Judgment open on the blackjack/poker table:
 
 ```powershell
-py -m judgment_assist.capture.calibrate windows                     # find the title
-py -m judgment_assist.capture.calibrate templates --window Judgment # build card library
-py -m judgment_assist.capture.calibrate mark --game blackjack --window Judgment
-py -m judgment_assist.app.live blackjack                            # overlay shows the play
+py -m judgment_assist.capture.calibrate windows                                  # find the title
+# blackjack needs only the 13 rank glyphs (suit-agnostic):
+py -m judgment_assist.capture.calibrate templates --mode rank --window Judgment
+py -m judgment_assist.capture.calibrate mark --game blackjack --window Judgment   # box the corner ranks
+py -m judgment_assist.app.live blackjack                                          # overlay shows the play
 ```
+
+Poker uses full cards (suits matter for flushes), so build its library with the
+default card mode: `calibrate templates --window Judgment` (all 52) and
+`calibrate mark --game poker --window Judgment`.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full calibration walkthrough and
 the build-phase status.

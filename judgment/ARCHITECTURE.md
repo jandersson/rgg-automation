@@ -55,13 +55,18 @@ library once from the running game (calibration step).
 
 The code is done; what's left needs the game on screen (one-time, ~10 min):
 1. `calibrate windows` → find Judgment's window title.
-2. `calibrate templates --window Judgment` → crop one clean copy of every
-   rank+suit into `data/templates/` (collect across a few hands/games).
-3. `calibrate mark --game blackjack --window Judgment` and `--game poker` → drag
-   boxes around the card slots; writes `config/regions.json`.
+2. Build the template library into `data/templates/` (collect across a few hands):
+   - blackjack: `calibrate templates --mode rank --window Judgment` → just the 13
+     rank glyphs (suit-agnostic), cropped from a card corner.
+   - poker: `calibrate templates --window Judgment` → all 52 full cards.
+3. `calibrate mark --game blackjack --window Judgment` (box the corner ranks) and
+   `--game poker` (box whole cards) → writes `config/regions.json`.
 4. `py -m judgment_assist.app.live blackjack` (or `poker`) → overlay shows the
    play. Auto card-counting across hands and chip-count OCR are the next code
    steps once the read is proven reliable.
+
+Start with blackjack: fewer ROIs, a static turn-based screen, a deterministic
+(lookup) decision, and only 13 suit-agnostic templates to collect.
 
 ## Open empirical questions (the tool will answer these)
 
