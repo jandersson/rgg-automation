@@ -1,0 +1,17 @@
+{
+  "_comment": "Copy to regions.json and fill after running the calibration tool. All coords are pixels on the chosen monitor. 'monitor' is the mss monitor index (1 = primary). Each card ROI is [left, top, width, height].",
+  "monitor": 1,
+  "blackjack": {
+    "player_cards": [],
+    "dealer_cards": [],
+    "dealer_upcard": [0, 0, 0, 0],
+    "bet_amount": [0, 0, 0, 0]
+  },
+  "poker": {
+    "hole_cards": [[0, 0, 0, 0], [0, 0, 0, 0]],
+    "board_cards": [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+    "pot": [0, 0, 0, 0],
+    "to_call": [0, 0, 0, 0],
+    "active_opponents": null
+  }
+}

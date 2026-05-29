@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Editors
+.vscode/
+.idea/
+
+# User-specific calibration & captured assets (machine/resolution dependent)
+judgment/config/regions.json
+judgment/captures/
+judgment/data/templates/

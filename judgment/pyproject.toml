@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "judgment-assist"
+version = "0.1.0"
+description = "Real-time move advisor for Judgment's poker and blackjack minigames"
+requires-python = ">=3.10"
+dependencies = ["mss>=9.0", "numpy>=1.24", "opencv-python>=4.8"]
+
+[tool.setuptools]
+packages = ["judgment_assist"]
+
+[tool.pytest.ini_options]
+# Lets `from judgment_assist...` resolve without an install. The brains import
+# no heavy deps, so tests run with just pytest present.
+pythonpath = ["."]
+testpaths = ["tests"]
