@@ -46,7 +46,7 @@ def _show_bj(adv, hand, up):
 
 
 def run_blackjack(a):
-    rules = Rules(decks=a.decks, hit_soft_17=a.h17, surrender=a.surrender)
+    rules = Rules(decks=a.decks, hit_soft_17=a.h17, surrender=a.surrender, split=a.split)
     adv = BlackjackAdvisor(rules)
     if a.seen:
         adv.observe(_ranks(a.seen))
@@ -129,8 +129,11 @@ def build_parser():
     bj.add_argument("--dealer", help="dealer up card, e.g. 'T'")
     bj.add_argument("--seen", help="cards already seen this shoe (feeds the count)")
     bj.add_argument("--decks", type=int, default=6)
-    bj.add_argument("--h17", action="store_true", help="dealer hits soft 17")
-    bj.add_argument("--surrender", action="store_true", help="late surrender allowed")
+    bj.add_argument("--h17", action="store_true", help="dealer hits soft 17 (Judgment is S17)")
+    bj.add_argument("--no-surrender", dest="surrender", action="store_false",
+                    help="disable late surrender (Judgment offers it; on by default)")
+    bj.add_argument("--no-split", dest="split", action="store_false",
+                    help="disable split (set if this game has no Split option)")
     bj.set_defaults(func=run_blackjack)
 
     pk = sub.add_parser("poker", help="Texas Hold'em equity + pot-odds advisor")

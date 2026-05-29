@@ -8,12 +8,15 @@ from .counting import HiLoCounter
 
 @dataclass
 class Rules:
+    # Defaults are Judgment's confirmed rules: dealer stands on 17 (felt:
+    # "must stand on 17 and must draw to 16"), late surrender offered, BJ 3:2.
     decks: int = 6                 # unknown for Judgment until measured
-    hit_soft_17: bool = False
+    hit_soft_17: bool = False      # S17 (felt: dealer stands on 17)
     das: bool = True               # double after split
-    surrender: bool = False
+    surrender: bool = True         # Judgment offers Surrender
+    split: bool = True             # set False if this game has no Split
     charlie: int = 6               # six-card charlie auto-win
-    blackjack_pays: float = 2.5    # Judgment pays 2.5x the bet for a natural
+    blackjack_pays: float = 2.5    # 3:2 -> 2.5x total return on a natural
     insurance_tc: float = 3.0      # take insurance at/above this true count
     charlie_hit_threshold: float = 0.5  # push for charlie while bust prob below this
 
@@ -60,7 +63,7 @@ class BlackjackAdvisor:
         return recommend(
             player_ranks, dealer_up,
             can_double=can_double,
-            can_split=can_split,
+            can_split=can_split and self.rules.split,
             can_surrender=self.rules.surrender,
             true_count=tc,
             hit_soft_17=self.rules.hit_soft_17,
