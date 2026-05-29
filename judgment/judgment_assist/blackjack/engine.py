@@ -53,11 +53,15 @@ class BlackjackAdvisor:
                 return Decision(HIT, f"hit for six-card charlie (bust≈{pb:.0%}, "
                                      f"{self.rules.charlie - n} card to auto-win)")
 
+        # Apply count deviations only when actually counting (cards observed);
+        # otherwise give pure basic strategy rather than deviating off an
+        # assumed true count of 0.
+        tc = self.counter.true_count if self.counter.seen else None
         return recommend(
             player_ranks, dealer_up,
             can_double=can_double,
             can_split=can_split,
             can_surrender=self.rules.surrender,
-            true_count=self.counter.true_count,
+            true_count=tc,
             hit_soft_17=self.rules.hit_soft_17,
         )
