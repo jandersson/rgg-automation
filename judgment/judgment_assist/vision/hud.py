@@ -76,6 +76,8 @@ class HudReader:
     def read(self, badge_bgr):
         """Return ``(value:int|None, confidence:float)``. ``None`` when the badge
         can't be read confidently (empty/animating/occluded)."""
+        if badge_bgr is None or badge_bgr.size == 0 or min(badge_bgr.shape[:2]) < 4:
+            return None, 0.0
         gray = cv2.cvtColor(badge_bgr, cv2.COLOR_BGR2GRAY)
         thr = _binarize(gray)
         boxes = self._digit_boxes(thr)

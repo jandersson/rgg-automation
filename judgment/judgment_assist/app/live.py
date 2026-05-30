@@ -83,9 +83,13 @@ def poker_text(rec, frame, roi_cfg, opponents, iters):
 
 def run(a):
     cfg = load_config(a.config)
-    roi_cfg = cfg.get(a.game)
+    # blackjack reads the HUD "Total" badges (config section 'hud'); poker reads
+    # cards (section 'poker').
+    section = "hud" if a.game == "blackjack" else a.game
+    roi_cfg = cfg.get(section)
     if not roi_cfg:
-        raise SystemExit(f"no '{a.game}' section in {a.config} — run calibration first")
+        raise SystemExit(f"no '{section}' section in {a.config} — "
+                         f"run calibration first (mark --game {section})")
 
     if a.game == "blackjack":
         from ..vision.hud import HudReader
@@ -106,7 +110,11 @@ def run(a):
             while True:
                 base = resolve_base(cfg)
                 frame = g.grab(base)
-                if a.game == "blackjack":
+                # The game window collapses to 0x0 when minimized/not foreground;
+                # mss then returns an empty frame. Don't read it — wait.
+                if frame is None or frame.size == 0 or min(frame.shape[:2]) < 10:
+                    text = f"{a.game}: game window not visible (focus Judgment)..."
+                elif a.game == "blackjack":
                     text = blackjack_text(reader, frame, roi_cfg)
                 else:
                     text = poker_text(reader, frame, roi_cfg, a.opp, a.iters)
