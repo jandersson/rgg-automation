@@ -1,16 +1,19 @@
 """Calibration helper — run against the live game (Judgment in borderless/
-windowed mode) to build the ROI config and the card template library.
+windowed mode) OR a saved screenshot, to build the ROI config and template
+libraries.
 
 Typical flow:
     py -m judgment_assist.capture.calibrate windows                 # find the title
     py -m judgment_assist.capture.calibrate templates --window Judgment   # build card library
     py -m judgment_assist.capture.calibrate mark --game blackjack --window Judgment
-    py -m judgment_assist.capture.calibrate mark --game poker --window Judgment
+    py -m judgment_assist.capture.calibrate mark --game hud --image captures\shot1.jpg
 
 `mark` and `templates` are interactive: an OpenCV window opens showing the
-current frame; drag a rectangle, press ENTER to accept (ESC/ENTER on empty to
-finish a multi-select). ROIs are stored relative to the captured base (the game
-window's client area when --window is used), so they survive moving the window.
+frame; drag a rectangle, press ENTER to accept (ESC/ENTER on empty to finish a
+multi-select). ROIs are stored relative to the captured base (the game window's
+client area when --window is used). Use --image to mark on a saved Steam F12
+screenshot — this sidesteps the game's pause-on-focus-loss that blanks live
+timed grabs.
 
 Lower-level commands (manual pixel coords) are also available:
     calibrate monitors
@@ -36,6 +39,13 @@ SPECS = {
         ("hole_cards", "multi", "your TWO hole cards (whole card)"),
         ("board_cards", "multi", "all FIVE community card positions (whole card)"),
     ],
+    # HUD badges: the numeric totals Judgment shows on a decision frame. Box the
+    # NUMBER only (tight around the digits), not the whole badge or the "Total"
+    # label above it.
+    "hud": [
+        ("dealer_total", "single", "the dealer's TOTAL number (top badge) — digits only"),
+        ("player_total", "single", "YOUR hand TOTAL number (your badge) — digits only"),
+    ],
 }
 
 
@@ -58,9 +68,16 @@ def _save_json(path, data):
         json.dump(data, f, indent=2)
 
 
-def _grab_base(monitor, window):
-    """Capture the base frame: the game window's client area if --window is
-    given, else the whole monitor."""
+def _grab_base(monitor, window, image=None):
+    """Get the base frame to mark on. If ``image`` is given, load that saved
+    screenshot (no live capture — sidesteps the game's pause-on-focus-loss).
+    Otherwise grab the game window's client area, or the whole monitor."""
+    if image:
+        import cv2
+        img = cv2.imread(image)
+        if img is None:
+            raise SystemExit(f"could not read image {image!r}")
+        return img
     with ScreenGrabber(monitor=monitor or 1) as g:
         if window:
             from .window import find_window_region
@@ -90,7 +107,7 @@ def cmd_windows(a):
 
 
 def cmd_snapshot(a):
-    img = _grab_base(a.monitor, a.window)
+    img = _grab_base(a.monitor, a.window, a.image)
     _imwrite(a.out, img)
     print(f"  saved {img.shape[1]}x{img.shape[0]} -> {a.out}")
 
@@ -107,7 +124,7 @@ def cmd_crop(a):
 
 def cmd_mark(a):
     import cv2
-    frame = _grab_base(a.monitor, a.window)
+    frame = _grab_base(a.monitor, a.window, a.image)
     result = {}
     for key, kind, desc in SPECS[a.game]:
         print(f"\n[{key}] drag a box around {desc}; ENTER to accept"
@@ -120,8 +137,11 @@ def cmd_mark(a):
         cv2.destroyAllWindows()
 
     cfg = _load_json(a.out)
-    if a.window:
-        cfg["window"] = a.window
+    # ROIs are relative to the window client area; record the window so live
+    # capture targets it. When marking on a saved image there's no live window,
+    # so default to the Judgment title (overridable with --window).
+    if a.window or a.image:
+        cfg["window"] = a.window or cfg.get("window") or "Judgment"
         cfg.pop("monitor", None)
     else:
         cfg["monitor"] = a.monitor or 1
@@ -150,7 +170,7 @@ def cmd_templates(a):
         def canon(raw):
             return card_str(parse_card(raw))  # raises ValueError on bad input
 
-    frame = _grab_base(a.monitor, a.window)
+    frame = _grab_base(a.monitor, a.window, a.image)
     print(f"Drag a box around each {unit} (ENTER between, ESC/empty to finish).")
     boxes = cv2.selectROIs("templates", frame, showCrosshair=False)
     cv2.destroyAllWindows()
@@ -186,6 +206,9 @@ def main(argv=None):
     def add_source(sp):
         sp.add_argument("--monitor", type=int, default=None)
         sp.add_argument("--window", default=None, help="window title substring")
+        sp.add_argument("--image", default=None,
+                        help="mark on a saved screenshot instead of a live grab "
+                             "(e.g. a Steam F12 capture); avoids the game's pause")
 
     s = sub.add_parser("snapshot"); add_source(s)
     s.add_argument("--out", default="captures/frame.png"); s.set_defaults(func=cmd_snapshot)
