@@ -14,3 +14,6 @@ venv/
 judgment/config/regions.json
 judgment/captures/
 judgment/data/templates/
+judgment/data/screens/
+judgment/data/synthetic/
+judgment/data/models/

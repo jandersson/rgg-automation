@@ -58,6 +58,22 @@ if _IS_WINDOWS:
                 return hwnd, title
         return None, None
 
+    def foreground_title():
+        """Title of the window the user is currently focused on (or '')."""
+        hwnd = _user32.GetForegroundWindow()
+        if not hwnd:
+            return ""
+        n = _user32.GetWindowTextLengthW(hwnd)
+        buf = ctypes.create_unicode_buffer(n + 1)
+        _user32.GetWindowTextW(hwnd, buf, n + 1)
+        return buf.value
+
+    def is_foreground(title_substring):
+        """True when the focused window's title contains ``title_substring``.
+        Used to capture only while the user is actually playing the game — so we
+        never grab the paused/dimmed state it shows when it loses focus."""
+        return title_substring.lower() in foreground_title().lower()
+
     def client_region(hwnd):
         """Screen-space rect of the window's client (rendered) area as
         ``{left, top, width, height}``."""
@@ -89,3 +105,9 @@ else:  # pragma: no cover - non-Windows stubs
 
     def find_window_region(title_substring):
         return None
+
+    def foreground_title():
+        return ""
+
+    def is_foreground(title_substring):
+        return False
