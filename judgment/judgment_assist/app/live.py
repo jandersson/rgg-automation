@@ -3,21 +3,22 @@
     py -m judgment_assist.app.live blackjack
     py -m judgment_assist.app.live poker --opp 3
 
-Reads ``config/regions.json`` (built with the calibration tool) and the card
-templates in ``data/templates``. If ``regions.json`` names a ``window`` we
-re-resolve that window's client area every frame (robust to moving the window);
-otherwise we grab the configured ``monitor`` whole. ROIs are stored relative to
-whichever base is captured, so calibration and runtime stay consistent.
+Reads ``config/regions.json`` (built with the calibration tool). If
+``regions.json`` names a ``window`` we re-resolve that window's client area every
+frame (robust to moving the window); otherwise we grab the configured
+``monitor`` whole. ROIs are stored relative to whichever base is captured, so
+calibration and runtime stay consistent.
 
 Advice-only by design — it never sends inputs to the game.
 
 Current scope:
-  blackjack — reads your hand + dealer up card -> basic strategy / Six-Card
-              Charlie advice. (Auto card-counting across hands is future work;
-              use the manual CLI's `seen` for counting today.)
-  poker     — reads hole + board -> equity & made hand vs ``--opp`` opponents.
-              Pot-odds need chip-count OCR (future); use the manual CLI for the
-              precise call/fold line.
+  blackjack — reads the two HUD "Total" badges (dealer up + player total) and
+              gives hit/stand advice. Totals alone can't tell soft hands, pairs,
+              or whether a double is still legal, so the overlay flags those for
+              a manual check. Needs the ``hud`` ROIs (calibrate mark --game hud)
+              and the digit templates in ``data/digits``.
+  poker     — reads hole + board cards via template matching -> equity & made
+              hand vs ``--opp`` opponents. Needs card templates + ``poker`` ROIs.
 """
 from __future__ import annotations
 
@@ -27,11 +28,8 @@ import os
 import time
 
 from ..cards import card_str, INT_TO_RANK
-from ..vision.recognizer import CardRecognizer
 from ..capture.screen import ScreenGrabber
 from ..capture.window import find_window_region
-from ..blackjack.engine import BlackjackAdvisor, Rules
-from ..blackjack.strategy import hand_total
 from ..poker.advisor import advise as poker_advise
 
 
@@ -51,17 +49,23 @@ def resolve_base(cfg):
     return None
 
 
-def blackjack_text(rec, frame, roi_cfg, advisor):
-    # rank-mode recogniser: recognize_many returns rank ints directly.
-    up = rec.recognize_many(frame, [roi_cfg["dealer_upcard"]])
-    ranks = rec.recognize_many(frame, roi_cfg.get("player_cards", []))
-    if not ranks or not up:
-        return "blackjack: waiting for cards..."
-    total, soft = hand_total(ranks)
-    dec = advisor.advise(ranks, up[0])
-    return (f"YOU {' '.join(INT_TO_RANK[r] for r in ranks)} = {total}{' soft' if soft else ''}\n"
-            f"DLR {INT_TO_RANK[up[0]]}\n"
-            f">>> {dec.action.upper()}  ({dec.reason})")
+def blackjack_text(reader, frame, roi_cfg, true_count=None):
+    """Read the two HUD badges and advise from totals."""
+    from ..blackjack.strategy import recommend_hard
+
+    dealer, dconf = reader.read_roi(frame, roi_cfg["dealer_total"])
+    player, pconf = reader.read_roi(frame, roi_cfg["player_total"])
+    if dealer is None or player is None:
+        return "blackjack: waiting for a decision (totals not visible)..."
+    if not (2 <= dealer <= 11):
+        return f"blackjack: dealer total {dealer}? (re-reading)"
+    if player > 21:
+        return f"YOU {player} — BUST"
+    dec = recommend_hard(player, dealer, true_count=true_count)
+    dlabel = "A" if dealer == 11 else str(dealer)
+    note = "  ⚠ if soft/pair, verify" if player <= 20 else ""
+    return (f"YOU {player}   DEALER {dlabel}\n"
+            f">>> {dec.action.upper()}  ({dec.reason}){note}")
 
 
 def poker_text(rec, frame, roi_cfg, opponents, iters):
@@ -83,9 +87,12 @@ def run(a):
     if not roi_cfg:
         raise SystemExit(f"no '{a.game}' section in {a.config} — run calibration first")
 
-    mode = a.mode if a.mode != "auto" else ("rank" if a.game == "blackjack" else "card")
-    rec = CardRecognizer(a.templates, mode=mode, min_confidence=a.min_confidence)
-    advisor = BlackjackAdvisor(Rules(decks=a.decks, hit_soft_17=a.h17)) if a.game == "blackjack" else None
+    if a.game == "blackjack":
+        from ..vision.hud import HudReader
+        reader = HudReader(a.digits, min_confidence=a.min_confidence)
+    else:
+        from ..vision.recognizer import CardRecognizer
+        reader = CardRecognizer(a.templates, mode="card", min_confidence=a.min_confidence)
 
     overlay = None
     if not a.no_overlay:
@@ -100,9 +107,9 @@ def run(a):
                 base = resolve_base(cfg)
                 frame = g.grab(base)
                 if a.game == "blackjack":
-                    text = blackjack_text(rec, frame, roi_cfg, advisor)
+                    text = blackjack_text(reader, frame, roi_cfg)
                 else:
-                    text = poker_text(rec, frame, roi_cfg, a.opp, a.iters)
+                    text = poker_text(reader, frame, roi_cfg, a.opp, a.iters)
                 if overlay:
                     overlay.update_text(text)
                 else:
@@ -119,17 +126,13 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="judgment-assist live")
     p.add_argument("game", choices=["blackjack", "poker"])
     p.add_argument("--config", default="config/regions.json")
-    p.add_argument("--templates", default="data/templates")
-    p.add_argument("--mode", choices=["auto", "card", "rank"], default="auto",
-                   help="template type; auto = rank for blackjack, card for poker")
+    p.add_argument("--templates", default="data/templates", help="card templates (poker)")
+    p.add_argument("--digits", default="data/digits", help="digit templates (blackjack HUD)")
     p.add_argument("--interval", type=float, default=0.7, help="seconds between reads")
     p.add_argument("--min-confidence", dest="min_confidence", type=float, default=0.6)
     p.add_argument("--no-overlay", action="store_true", help="print to console instead")
     p.add_argument("--x", type=int, default=40)
     p.add_argument("--y", type=int, default=40)
-    # blackjack
-    p.add_argument("--decks", type=int, default=6)
-    p.add_argument("--h17", action="store_true")
     # poker
     p.add_argument("--opp", type=int, default=2)
     p.add_argument("--iters", type=int, default=12000)

@@ -53,6 +53,42 @@ def bust_probability(ranks):
     return sum(p for v, p in probs.items() if v > room)
 
 
+def recommend_hard(player_total, dealer_value, *, true_count=None):
+    """Hit/stand advice from TOTALS alone (the HUD-overlay case).
+
+    ``dealer_value`` is the dealer up-card value, 2..11 (11 = Ace) — exactly what
+    the dealer "Total" badge shows during the player's turn. The player hand is
+    treated as a HARD total: this is correct for hard hands, but cannot see soft
+    hands (an Ace counted as 11), pairs, or whether doubling is still legal. The
+    live overlay therefore flags those cases for manual check. Count deviations
+    mirror ``recommend``'s when a ``true_count`` is given.
+    """
+    d, t, tc = dealer_value, player_total, true_count
+
+    def ge(thr):
+        return tc is not None and tc >= thr
+
+    if t >= 17:
+        return Decision(STAND, f"hard {t}")
+    if t == 16:
+        if d == 10 and ge(0):
+            return Decision(STAND, "16 vs 10 stand (TC>=0)")
+        return Decision(STAND, "16 stand vs 2-6") if d <= 6 else Decision(HIT, "16 hit vs 7+")
+    if t == 15:
+        if d == 10 and ge(4):
+            return Decision(STAND, "15 vs 10 stand (TC>=4)")
+        return Decision(STAND, "15 stand vs 2-6") if d <= 6 else Decision(HIT, "15 hit vs 7+")
+    if t in (13, 14):
+        return Decision(STAND, f"{t} stand vs 2-6") if d <= 6 else Decision(HIT, f"{t} hit vs 7+")
+    if t == 12:
+        if d == 2 and ge(3):
+            return Decision(STAND, "12 vs 2 stand (TC>=3)")
+        if d == 3 and ge(2):
+            return Decision(STAND, "12 vs 3 stand (TC>=2)")
+        return Decision(STAND, "12 stand vs 4-6") if d in (4, 5, 6) else Decision(HIT, "12 hit")
+    return Decision(HIT, f"hard {t} hit")
+
+
 def _is_pair(ranks):
     return len(ranks) == 2 and card_value(ranks[0]) == card_value(ranks[1])
 

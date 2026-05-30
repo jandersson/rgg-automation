@@ -96,3 +96,9 @@ class HudReader:
         if conf < self.min_confidence:
             return None, conf
         return int("".join(digits)), conf
+
+    def read_roi(self, frame_bgr, roi):
+        """Read the badge at ``roi`` = ``[left, top, width, height]`` within a
+        full frame. Returns ``(value:int|None, confidence:float)``."""
+        l, t, w, h = roi
+        return self.read(frame_bgr[t:t + h, l:l + w])
