@@ -63,7 +63,7 @@ def blackjack_text(reader, frame, roi_cfg, true_count=None):
         return f"YOU {player} — BUST"
     dec = recommend_hard(player, dealer, true_count=true_count)
     dlabel = "A" if dealer == 11 else str(dealer)
-    note = "  ⚠ if soft/pair, verify" if player <= 20 else ""
+    note = "  (!) if soft/pair, verify" if player <= 20 else ""
     return (f"YOU {player}   DEALER {dlabel}\n"
             f">>> {dec.action.upper()}  ({dec.reason}){note}")
 
