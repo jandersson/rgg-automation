@@ -1,7 +1,0 @@
-# Brains (pure python) need only pytest to run the test suite.
-pytest>=7.0
-
-# Eyes (phase 1+): screen capture and card recognition.
-mss>=9.0
-numpy>=1.24
-opencv-python>=4.8

@@ -9,6 +9,10 @@ description = "Real-time move advisor for Judgment's poker and blackjack minigam
 requires-python = ">=3.10"
 dependencies = ["mss>=9.0", "numpy>=1.24", "opencv-python>=4.8"]
 
+# Managed with uv: `uv sync` to create .venv + install, `uv run pytest` to test.
+[dependency-groups]
+dev = ["pytest>=7.0"]
+
 [tool.setuptools]
 packages = ["judgment_assist"]
 
