@@ -61,7 +61,7 @@ The code is done; what's left needs the game on screen (one-time, ~10 min):
    - poker: `calibrate templates --window Judgment` → all 52 full cards.
 3. `calibrate mark --game blackjack --window Judgment` (box the corner ranks) and
    `--game poker` (box whole cards) → writes `config/regions.json`.
-4. `py -m judgment_assist.app.live blackjack` (or `poker`) → overlay shows the
+4. `uv run python -m judgment_assist.app.live blackjack` (or `poker`) → overlay shows the
    play. Auto card-counting across hands and chip-count OCR are the next code
    steps once the read is proven reliable.
 

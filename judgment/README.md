@@ -27,24 +27,28 @@ opponents given the board?"* plus pot odds — not a draw-discard calc.
   persistent shoe.* The tool tracks cards seen across hands so we can detect
   reshuffles and confirm whether counting is worth anything here.
 
-## Quick start (brains only — works now)
+## Setup (uv)
+
+This project uses [uv](https://docs.astral.sh/uv/). One command creates the
+virtualenv (`.venv`), installs deps pinned by `uv.lock`, and installs the
+package editable:
 
 ```powershell
 cd C:\Users\jonaS\dev\jonas\rgg-automation\judgment
-py -m pip install -r requirements.txt        # for tests you only need pytest
-py -m pytest                                  # run the logic tests
+uv sync                                        # create .venv + install
+uv run pytest                                  # run the logic tests
 ```
+
+`uv run <cmd>` runs inside the managed env — no `pip install`, no `PYTHONPATH`.
 
 ## Manual advisor (works now — no capture)
 
 ```powershell
-$env:PYTHONPATH = "C:\Users\jonaS\dev\jonas\rgg-automation\judgment"
-
 # blackjack: your hand vs dealer up-card (--seen feeds the count)
-py -m judgment_assist.app.cli blackjack --hand "T 6" --dealer T
+uv run python -m judgment_assist.app.cli blackjack --hand "T 6" --dealer T
 
 # poker (Hold'em): hole cards, board, opponents, pot, cost-to-call
-py -m judgment_assist.app.cli poker --hole "Ah Kh" --board "Qh 7h 2h" --opp 2
+uv run python -m judgment_assist.app.cli poker --hole "Ah Kh" --board "Qh 7h 2h" --opp 2
 ```
 
 Both also run as interactive REPLs (omit `--hand` / `--hole`).
@@ -55,12 +59,15 @@ Source is **PC Steam, borderless/windowed**; advice/overlay only (no inputs are
 sent to the game). With Judgment open on the blackjack/poker table:
 
 ```powershell
-py -m judgment_assist.capture.calibrate windows                                  # find the title
+uv run python -m judgment_assist.capture.calibrate windows                          # find the title
 # blackjack needs only the 13 rank glyphs (suit-agnostic):
-py -m judgment_assist.capture.calibrate templates --mode rank --window Judgment
-py -m judgment_assist.capture.calibrate mark --game blackjack --window Judgment   # box the corner ranks
-py -m judgment_assist.app.live blackjack                                          # overlay shows the play
+uv run python -m judgment_assist.capture.calibrate templates --mode rank --window Judgment
+uv run python -m judgment_assist.capture.calibrate mark --game blackjack --window Judgment
+uv run python -m judgment_assist.app.live blackjack                                 # overlay shows the play
 ```
+
+You can also mark HUD/card ROIs on a saved Steam **F12** screenshot with
+`--image captures\shot.jpg` (avoids the game's pause-on-focus-loss).
 
 Poker uses full cards (suits matter for flushes), so build its library with the
 default card mode: `calibrate templates --window Judgment` (all 52) and
