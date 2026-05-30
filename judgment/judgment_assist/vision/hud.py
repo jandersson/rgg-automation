@@ -51,12 +51,26 @@ class HudReader:
                 f"calibration tool (digits mode) first")
 
     def _digit_boxes(self, thr):
-        """Left-to-right bounding boxes of digit-sized components."""
+        """Left-to-right bounding boxes of digit-sized components.
+
+        This badge font kerns tightly, so two digits often merge into one
+        connected component. A blob much wider than a single digit (judged by
+        aspect ratio against its own height) is split evenly into the estimated
+        number of digits."""
         n, _labels, stats, _c = cv2.connectedComponentsWithStats(thr, connectivity=8)
         h_img = thr.shape[0]
-        boxes = [(s[0], s[1], s[2], s[3]) for s in stats[1:]
-                 if s[3] >= 0.4 * h_img and s[4] >= 6]   # tall enough, not a speck
-        boxes.sort(key=lambda b: b[0])
+        raw = [(int(s[0]), int(s[1]), int(s[2]), int(s[3])) for s in stats[1:]
+               if s[3] >= 0.35 * h_img and s[4] >= 5]   # tall enough, not a speck
+        raw.sort(key=lambda b: b[0])
+        boxes = []
+        for (x, y, w, h) in raw:
+            k = max(1, round(w / (0.62 * h)))   # est digits from width/height
+            if k == 1:
+                boxes.append((x, y, w, h))
+            else:
+                pw = w // k
+                for i in range(k):
+                    boxes.append((x + i * pw, y, pw, h))
         return boxes
 
     def read(self, badge_bgr):
