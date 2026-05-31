@@ -99,10 +99,13 @@ def blackjack_text(reader, frame, roi_cfg, true_count=None, card_reads=None):
 
 
 def count_line(shoe):
-    """One-line Hi-Lo readout for the overlay."""
+    """One-line Hi-Lo readout. EXPERIMENTAL / UNRELIABLE: this is a multi-seat
+    table — other players' and the dealer's cards sit at the edges, angled and
+    often clipped off-frame, so they can't be read. The count therefore misses
+    most of the shoe and must NOT be used for betting; it's shown for dev only."""
     last = f"  last:{shoe.last_outcome}" if shoe.last_outcome else ""
-    return (f"COUNT  RC {shoe.running:+d}  TC {shoe.true_count:+.1f}"
-            f"  ({shoe.seen} cards, {shoe.hands} hands){last}  bet {shoe.bet_units()}u")
+    return (f"COUNT(exp/unreliable)  RC {shoe.running:+d}  TC {shoe.true_count:+.1f}"
+            f"  ({shoe.seen} cards, {shoe.hands} hands){last}")
 
 
 def log_hand(path, shoe):
