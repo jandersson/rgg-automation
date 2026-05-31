@@ -8,12 +8,14 @@ gap in card reads) and it names the outcome — useful for a session tally.
 Templates live in ``data/results/<CUE>.png`` (cropped at 1920x1080). We scan a
 central band — below the permanent felt "BLACK JACK" title, where the result
 banners render — and template-match each; the best match above ``min_score``
-wins. BUST is intentionally NOT a template (its red on-card text is mostly
-background and false-matched the felt/cards): a bust is already known from the
-HUD player total (>21).
+wins. BUST is included; its orange-gold on-card text needs a TIGHT crop (a loose
+crop was mostly card background and false-matched the felt/cards), but cropped
+tight it self-matches and stays clear of normal card frames. (A bust is also
+known independently from the HUD player total > 21.)
 
 Validated on real frames: each cue self-matches 1.0 on its own frame; no-banner
-frames score <=0.25, so 0.6 separates cleanly.
+frames score <=0.25, so 0.6 separates cleanly. WIN/LOSE/PUSH/BLACKJACK were also
+confirmed 72/72 across every real instance in the capture.
 """
 from __future__ import annotations
 

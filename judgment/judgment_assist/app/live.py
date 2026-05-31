@@ -183,8 +183,9 @@ def run(a):
                             shoe.end_hand(cue)
                         prev_cue = cue
                     if shoe is not None:
-                        # a bust shows a BUST! banner, but it's red text on the cards that
-                        # template-matches unreliably (false-matched the felt) -> use the HUD total
+                        # a bust is detected as a BUST! cue above (result_reader), but the
+                        # HUD player total > 21 is a cheap independent fallback in case the
+                        # banner read is missed on a given frame.
                         pt, _ = reader.read_roi(frame, roi_cfg["player_total"])
                         busted = pt is not None and pt > 21
                         if busted and not prev_busted:
