@@ -60,9 +60,12 @@ class ShoeCounter:
     A dealt card stays on screen for many frames, so naively counting every read
     would multiply-count it. Instead we track the current hand's rank multiset and
     only credit a rank when MORE of it appears than we've already counted (a hit or
-    a freshly revealed card). Between hands the table clears (a run of card-free
-    frames); that ends the hand and resets the per-hand multiset, while the running
-    count carries across hands until ``reset()`` (a reshuffle / new shoe).
+    a freshly revealed card). A hand ends only after a *sustained* run of card-free
+    frames (``clear_frames``) — a real between-hands gap lasts seconds, whereas the
+    brief no-card blips mid-hand (deal/hit animation, the result screen dimming the
+    table) are 1-2 frames; a single card frame resets the empty counter, so a blip
+    never splits one hand into two or double-counts its cards. The running count
+    carries across hands until ``reset()`` (a reshuffle / new shoe).
 
     Reads are noisy, so a frame's multiset must repeat for ``confirm`` consecutive
     frames before its growth is credited — a one-frame misread won't bump the count.
@@ -73,7 +76,7 @@ class ShoeCounter:
     complete shoe count — improving dealer-card capture is future work (issue #5).
     """
 
-    def __init__(self, decks=6, confirm=2, clear_frames=2):
+    def __init__(self, decks=6, confirm=2, clear_frames=5):
         self.counter = HiLoCounter(decks=decks)
         self.confirm = confirm
         self.clear_frames = clear_frames
@@ -89,7 +92,7 @@ class ShoeCounter:
         if not fc:
             self._empty_n += 1
             if self._empty_n >= self.clear_frames and self._hand:
-                self._hand.clear()          # table cleared -> hand finished
+                self._hand.clear()          # sustained clear -> hand finished
                 self.hands += 1
                 self._stable, self._stable_n = None, 0
             return

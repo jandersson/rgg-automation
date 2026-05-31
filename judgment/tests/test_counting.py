@@ -39,6 +39,17 @@ def test_table_clear_ends_hand_but_count_persists():
     assert sc.seen == 4 and sc.running == 4
 
 
+def test_brief_no_card_blip_does_not_split_a_hand():
+    # a hand with a 2-frame no-card blip mid-hand (e.g. a hit animation / result
+    # dimming) must stay ONE hand and not re-count its cards (clear_frames=5)
+    sc = ShoeCounter(confirm=2, clear_frames=5)
+    _feed(sc, [[10, 7]] * 3)        # 10(-1) + 7(0)
+    _feed(sc, [[], []])             # brief blip, shorter than clear_frames
+    _feed(sc, [[10, 7]] * 3)        # cards back
+    assert sc.hands == 0            # not split
+    assert sc.seen == 2 and sc.running == -1  # not double-counted
+
+
 def test_confirm_gate_ignores_one_frame_blip():
     sc = ShoeCounter(confirm=2)
     _feed(sc, [[6]])               # single frame -> not yet trusted
