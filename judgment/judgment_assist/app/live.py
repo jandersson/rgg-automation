@@ -109,6 +109,9 @@ def log_hand(path, shoe):
     """Append one CSV row per finished hand — the data to answer 'persistent shoe?'
     (does the running count drift and hold across hands, or reset each hand?)."""
     import datetime
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     new = not os.path.exists(path)
     with open(path, "a", encoding="utf-8") as f:
         if new:

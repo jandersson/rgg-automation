@@ -32,7 +32,7 @@ def test_log_hand_writes_a_csv_row(tmp_path):
     sc = ShoeCounter(confirm=1)
     sc.observe([5, 6])          # +2, two cards
     sc.end_hand("WIN")
-    p = tmp_path / "hands.csv"
+    p = tmp_path / "sessions" / "hands.csv"   # parent dir does not exist yet
     log_hand(str(p), sc)
     lines = p.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "time,hand,outcome,running,true_count,cards_seen"
