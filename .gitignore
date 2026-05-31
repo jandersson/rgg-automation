@@ -15,6 +15,7 @@ judgment/config/regions.json
 judgment/captures/
 judgment/data/templates/
 judgment/data/results/
+judgment/data/sessions/
 judgment/data/crops/
 judgment/data/screens/
 judgment/data/synthetic/

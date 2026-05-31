@@ -121,14 +121,19 @@ class ShoeCounter:
         recording ``outcome``. The banner lingers over the still-visible cards,
         so we suppress counting until the table next clears — otherwise the just
         finished hand's cards would be credited a second time. Idempotent: only
-        the first call while a hand is in progress advances the hand count."""
+        the first call while a hand is in progress advances the hand count.
+
+        Returns True if this call actually ended a hand (so the caller logs the
+        completed hand exactly once even when several signals fire — cue + bust)."""
         if outcome is not None:
             self.last_outcome = outcome
-        if self._hand:
+        ended = bool(self._hand)
+        if ended:
             self.hands += 1
         self._hand.clear()
         self._suppress = True
         self._stable, self._stable_n = None, 0
+        return ended
 
     def reset(self):
         """New shoe / reshuffle: zero the running count and per-hand state."""

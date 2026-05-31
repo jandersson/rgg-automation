@@ -1,5 +1,6 @@
 """Tests for the live advisor's player-hand identification + full-strategy upgrade."""
-from judgment_assist.app.live import match_player_hand
+from judgment_assist.app.live import match_player_hand, log_hand
+from judgment_assist.blackjack.counting import ShoeCounter
 from judgment_assist.blackjack.strategy import recommend, DOUBLE, SPLIT
 
 
@@ -25,3 +26,15 @@ def test_matched_hand_drives_double_and_split_advice():
     assert recommend(hand, 10).action == DOUBLE
     pair8 = match_player_hand([[8, 8], [7]], 16)          # pair of 8s
     assert recommend(pair8, 7).action == SPLIT
+
+
+def test_log_hand_writes_a_csv_row(tmp_path):
+    sc = ShoeCounter(confirm=1)
+    sc.observe([5, 6])          # +2, two cards
+    sc.end_hand("WIN")
+    p = tmp_path / "hands.csv"
+    log_hand(str(p), sc)
+    lines = p.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "time,hand,outcome,running,true_count,cards_seen"
+    fields = lines[1].split(",")
+    assert fields[1] == "1" and fields[2] == "WIN" and fields[3] == "2" and fields[5] == "2"

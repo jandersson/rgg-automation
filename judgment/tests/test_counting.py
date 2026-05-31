@@ -86,6 +86,13 @@ def test_end_hand_records_outcome_and_suppresses_recount():
     assert sc.seen == 4 and sc.hands == 1
 
 
+def test_end_hand_returns_true_only_when_a_hand_was_in_progress():
+    sc = ShoeCounter(confirm=1)
+    _feed(sc, [[5, 6]])              # a hand in progress
+    assert sc.end_hand("WIN") is True       # really ended it -> caller logs once
+    assert sc.end_hand("WIN") is False      # idempotent: nothing left to end
+
+
 def test_reset_zeroes_everything():
     sc = ShoeCounter(confirm=1)
     _feed(sc, [[10, 10]])          # two tens -> -2
