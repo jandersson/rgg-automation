@@ -49,3 +49,81 @@ class HiLoCounter:
         """Call on a detected reshuffle."""
         self.running = 0
         self.seen = 0
+
+
+from collections import Counter
+
+
+class ShoeCounter:
+    """Maintain a Hi-Lo count from frame-by-frame rank reads of the live table.
+
+    A dealt card stays on screen for many frames, so naively counting every read
+    would multiply-count it. Instead we track the current hand's rank multiset and
+    only credit a rank when MORE of it appears than we've already counted (a hit or
+    a freshly revealed card). Between hands the table clears (a run of card-free
+    frames); that ends the hand and resets the per-hand multiset, while the running
+    count carries across hands until ``reset()`` (a reshuffle / new shoe).
+
+    Reads are noisy, so a frame's multiset must repeat for ``confirm`` consecutive
+    frames before its growth is credited — a one-frame misread won't bump the count.
+    (8 and 9 are both Hi-Lo 0, so the common 8<->9 flicker is count-neutral anyway.)
+
+    LIMITATION: only cards the reader localizes are counted. Dealer cards at the
+    table edge often aren't localized, so this is a best-effort count, not yet a
+    complete shoe count — improving dealer-card capture is future work (issue #5).
+    """
+
+    def __init__(self, decks=6, confirm=2, clear_frames=2):
+        self.counter = HiLoCounter(decks=decks)
+        self.confirm = confirm
+        self.clear_frames = clear_frames
+        self._hand = Counter()   # ranks already credited for the hand in progress
+        self._stable = None      # last frame's multiset (for the confirm gate)
+        self._stable_n = 0
+        self._empty_n = 0
+        self.hands = 0           # completed hands observed
+
+    def observe(self, ranks):
+        """Feed the ranks (rank ints) visible this frame; ``ranks`` may be empty."""
+        fc = Counter(int(r) for r in ranks)
+        if not fc:
+            self._empty_n += 1
+            if self._empty_n >= self.clear_frames and self._hand:
+                self._hand.clear()          # table cleared -> hand finished
+                self.hands += 1
+                self._stable, self._stable_n = None, 0
+            return
+        self._empty_n = 0
+        if fc == self._stable:
+            self._stable_n += 1
+        else:
+            self._stable, self._stable_n = fc, 1
+        if self._stable_n < self.confirm:
+            return
+        for rank, n in fc.items():
+            extra = n - self._hand.get(rank, 0)
+            for _ in range(max(0, extra)):   # only growth is a new card
+                self.counter.see(rank)
+            if extra > 0:
+                self._hand[rank] = n
+
+    def reset(self):
+        """New shoe / reshuffle: zero the running count and per-hand state."""
+        self.counter.reset()
+        self._hand.clear()
+        self._stable, self._stable_n, self._empty_n = None, 0, 0
+
+    @property
+    def running(self):
+        return self.counter.running
+
+    @property
+    def true_count(self):
+        return self.counter.true_count
+
+    @property
+    def seen(self):
+        return self.counter.seen
+
+    def bet_units(self, base=1, spread=8):
+        return self.counter.bet_units(base=base, spread=spread)
