@@ -84,19 +84,25 @@ class ShoeCounter:
         self._stable = None      # last frame's multiset (for the confirm gate)
         self._stable_n = 0
         self._empty_n = 0
+        self._suppress = False   # after a result banner: ignore lingering cards
         self.hands = 0           # completed hands observed
+        self.last_outcome = None # WIN/LOSE/PUSH/BLACKJACK of the last finished hand
 
     def observe(self, ranks):
         """Feed the ranks (rank ints) visible this frame; ``ranks`` may be empty."""
         fc = Counter(int(r) for r in ranks)
         if not fc:
             self._empty_n += 1
-            if self._empty_n >= self.clear_frames and self._hand:
-                self._hand.clear()          # sustained clear -> hand finished
-                self.hands += 1
+            if self._empty_n >= self.clear_frames:
+                if self._hand and not self._suppress:
+                    self.hands += 1         # sustained clear -> hand finished (no cue)
+                self._hand.clear()          # table cleared: lift suppression, ready for next
+                self._suppress = False
                 self._stable, self._stable_n = None, 0
             return
         self._empty_n = 0
+        if self._suppress:
+            return                          # result banner up; cards linger, don't recount
         if fc == self._stable:
             self._stable_n += 1
         else:
@@ -110,10 +116,25 @@ class ShoeCounter:
             if extra > 0:
                 self._hand[rank] = n
 
+    def end_hand(self, outcome=None):
+        """Mark the hand finished from a definitive signal (a result banner),
+        recording ``outcome``. The banner lingers over the still-visible cards,
+        so we suppress counting until the table next clears — otherwise the just
+        finished hand's cards would be credited a second time. Idempotent: only
+        the first call while a hand is in progress advances the hand count."""
+        if outcome is not None:
+            self.last_outcome = outcome
+        if self._hand:
+            self.hands += 1
+        self._hand.clear()
+        self._suppress = True
+        self._stable, self._stable_n = None, 0
+
     def reset(self):
         """New shoe / reshuffle: zero the running count and per-hand state."""
         self.counter.reset()
         self._hand.clear()
+        self._suppress = False
         self._stable, self._stable_n, self._empty_n = None, 0, 0
 
     @property

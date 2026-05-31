@@ -76,8 +76,9 @@ def blackjack_text(reader, frame, roi_cfg, true_count=None):
 
 def count_line(shoe):
     """One-line Hi-Lo readout for the overlay."""
+    last = f"  last:{shoe.last_outcome}" if shoe.last_outcome else ""
     return (f"COUNT  RC {shoe.running:+d}  TC {shoe.true_count:+.1f}"
-            f"  ({shoe.seen} cards, {shoe.hands} hands)  bet {shoe.bet_units()}u")
+            f"  ({shoe.seen} cards, {shoe.hands} hands){last}  bet {shoe.bet_units()}u")
 
 
 def poker_text(rec, frame, roi_cfg, opponents, iters):
@@ -103,13 +104,13 @@ def run(a):
         raise SystemExit(f"no '{section}' section in {a.config} — "
                          f"run calibration first (mark --game {section})")
 
-    rank_rec = shoe = read_ranks = None
+    rank_rec = shoe = read_ranks = result_reader = None
     if a.game == "blackjack":
         from ..vision.hud import HudReader
         reader = HudReader(a.digits, min_confidence=a.min_confidence)
         # Optional card counting: read ranks off the felt and keep a Hi-Lo count.
-        # Advice still works without it (totals come from the HUD), so a missing
-        # template library just disables the count rather than failing the run.
+        # Advice still works without it (totals come from the HUD), so missing
+        # templates just disable counting rather than failing the run.
         if not a.no_count:
             from ..vision.recognizer import CardRecognizer
             from ..vision.reader import read_ranks as _read_ranks
@@ -121,6 +122,12 @@ def run(a):
                 read_ranks = _read_ranks
             except RuntimeError as e:
                 print(f"  (card counting off — {e})")
+            # Result-banner reader gives a definitive hand boundary + outcome.
+            try:
+                from ..vision.result import ResultReader
+                result_reader = ResultReader(a.results)
+            except RuntimeError as e:
+                print(f"  (result-cue detection off — {e})")
     else:
         from ..vision.recognizer import CardRecognizer
         reader = CardRecognizer(a.templates, mode="card", min_confidence=a.min_confidence)
@@ -131,6 +138,7 @@ def run(a):
         overlay = SuggestionOverlay(x=a.x, y=a.y)
 
     monitor = cfg.get("monitor", 1)
+    prev_cue = None  # last frame's result banner, for rising-edge hand-end detection
     print(f"live {a.game} advisor running (Ctrl-C to stop). overlay={'off' if a.no_overlay else 'on'}")
     try:
         with ScreenGrabber(monitor=monitor) as g:
@@ -142,6 +150,11 @@ def run(a):
                 if frame is None or frame.size == 0 or min(frame.shape[:2]) < 10:
                     text = f"{a.game}: game window not visible (focus Judgment)..."
                 elif a.game == "blackjack":
+                    if result_reader is not None and shoe is not None:
+                        cue = result_reader.read(frame)
+                        if cue and cue != prev_cue:   # banner just appeared -> hand ended
+                            shoe.end_hand(cue)
+                        prev_cue = cue
                     if shoe is not None:
                         shoe.observe(read_ranks(frame, rank_rec))
                     text = blackjack_text(reader, frame, roi_cfg,
@@ -175,6 +188,8 @@ def main(argv=None):
     p.add_argument("--y", type=int, default=40)
     # blackjack counting
     p.add_argument("--decks", type=int, default=6, help="shoe size for true-count scaling")
+    p.add_argument("--results", default="data/results",
+                   help="result-banner templates (Win/Lose/Push/Blackjack)")
     p.add_argument("--no-count", action="store_true",
                    help="disable Hi-Lo card counting (advice only)")
     # poker

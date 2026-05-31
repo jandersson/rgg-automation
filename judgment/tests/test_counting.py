@@ -58,6 +58,22 @@ def test_confirm_gate_ignores_one_frame_blip():
     assert sc.seen == 1
 
 
+def test_end_hand_records_outcome_and_suppresses_recount():
+    # a result banner ends the hand, but the cards linger under it for several
+    # frames — those must NOT be re-counted, and the next hand counts fresh
+    sc = ShoeCounter(confirm=2, clear_frames=3)
+    _feed(sc, [[5, 6]] * 2)         # +2, hand in progress
+    sc.end_hand("WIN")              # banner appears -> hand ends
+    assert sc.hands == 1 and sc.last_outcome == "WIN"
+    _feed(sc, [[5, 6]] * 3)         # banner over the same cards -> suppressed
+    assert sc.seen == 2             # not double-counted
+    sc.end_hand("WIN")              # banner flickers / re-fires -> idempotent
+    assert sc.hands == 1
+    _feed(sc, [[], [], []])         # table clears -> suppression lifts
+    _feed(sc, [[9, 9]] * 2)         # next hand counts fresh (two 9s, Hi-Lo 0)
+    assert sc.seen == 4 and sc.hands == 1
+
+
 def test_reset_zeroes_everything():
     sc = ShoeCounter(confirm=1)
     _feed(sc, [[10, 10]])          # two tens -> -2
