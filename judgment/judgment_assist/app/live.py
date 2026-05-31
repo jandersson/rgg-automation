@@ -52,26 +52,50 @@ def resolve_base(cfg):
     return None
 
 
-def blackjack_text(reader, frame, roi_cfg, true_count=None):
-    """Read the two HUD badges and advise from totals."""
-    from ..blackjack.strategy import recommend_hard
+def _insurance(dealer, true_count):
+    # Insurance is +EV only at a high true count, on a dealer Ace up.
+    return ("  [TAKE INSURANCE]" if (dealer == 11 and true_count is not None
+                                     and true_count >= 3) else "")
 
-    dealer, dconf = reader.read_roi(frame, roi_cfg["dealer_total"])
-    player, pconf = reader.read_roi(frame, roi_cfg["player_total"])
+
+def match_player_hand(card_reads, total):
+    """The read cluster whose blackjack total equals ``total`` — i.e. the
+    player's hand, identified and validated via the reliable HUD total. Returns
+    None if no clean read matches, so the caller falls back to totals-only advice."""
+    from ..blackjack.strategy import hand_total
+    for ranks in (card_reads or []):
+        if ranks and hand_total(ranks)[0] == total:
+            return ranks
+    return None
+
+
+def blackjack_text(reader, frame, roi_cfg, true_count=None, card_reads=None):
+    """Advise from the HUD totals, upgraded to full strategy (double / split /
+    soft) when the player's actual cards are read and confirm the total."""
+    from ..blackjack.strategy import recommend_hard, recommend
+
+    dealer, _dc = reader.read_roi(frame, roi_cfg["dealer_total"])
+    player, _pc = reader.read_roi(frame, roi_cfg["player_total"])
     if dealer is None or player is None:
         return "blackjack: waiting for a decision (totals not visible)..."
     if not (2 <= dealer <= 11):
         return f"blackjack: dealer total {dealer}? (re-reading)"
     if player > 21:
         return f"YOU {player} — BUST"
-    dec = recommend_hard(player, dealer, true_count=true_count)
     dlabel = "A" if dealer == 11 else str(dealer)
-    note = "  (!) if soft/pair, verify" if player <= 20 else ""
-    # Insurance is +EV only at a high true count (dealer Ace up); flag it then.
-    ins = "  [TAKE INSURANCE]" if (dealer == 11 and true_count is not None
-                                   and true_count >= 3) else ""
+    hand = match_player_hand(card_reads, player)
+    if hand is not None:
+        # cards confirmed -> full strategy: knows soft/pair/2-card, can say DOUBLE/SPLIT
+        dealer_rank = 14 if dealer == 11 else dealer  # value -> a rank of that value
+        dec = recommend(hand, dealer_rank, true_count=true_count)
+        cards = " ".join(INT_TO_RANK[r] for r in hand)
+        return (f"YOU {player} [{cards}]   DEALER {dlabel}\n"
+                f">>> {dec.action.upper()}  ({dec.reason}){_insurance(dealer, true_count)}")
+    # cards not cleanly read -> totals only; can't see soft/pair/whether 2-card
+    dec = recommend_hard(player, dealer, true_count=true_count)
+    note = "  (!) if soft/pair/2-card, verify" if player <= 20 else ""
     return (f"YOU {player}   DEALER {dlabel}\n"
-            f">>> {dec.action.upper()}  ({dec.reason}){note}{ins}")
+            f">>> {dec.action.upper()}  ({dec.reason}){note}{_insurance(dealer, true_count)}")
 
 
 def count_line(shoe):
@@ -104,24 +128,24 @@ def run(a):
         raise SystemExit(f"no '{section}' section in {a.config} — "
                          f"run calibration first (mark --game {section})")
 
-    rank_rec = shoe = read_ranks = result_reader = None
+    rank_rec = shoe = read_clusters = result_reader = None
     if a.game == "blackjack":
         from ..vision.hud import HudReader
         reader = HudReader(a.digits, min_confidence=a.min_confidence)
-        # Optional card counting: read ranks off the felt and keep a Hi-Lo count.
-        # Advice still works without it (totals come from the HUD), so missing
-        # templates just disable counting rather than failing the run.
+        # Optional card reading: ranks off the felt drive the Hi-Lo count AND
+        # upgrade the advice to double/split/soft. Advice still works without it
+        # (totals from the HUD), so missing templates just disable it.
         if not a.no_count:
             from ..vision.recognizer import CardRecognizer
-            from ..vision.reader import read_ranks as _read_ranks
+            from ..vision.reader import read_clusters as _read_clusters
             from ..blackjack.counting import ShoeCounter
             try:
                 rank_rec = CardRecognizer(a.templates, mode="rank",
                                           min_confidence=a.min_confidence)
                 shoe = ShoeCounter(decks=a.decks)
-                read_ranks = _read_ranks
+                read_clusters = _read_clusters
             except RuntimeError as e:
-                print(f"  (card counting off — {e})")
+                print(f"  (card reading off — {e})")
             # Result-banner reader gives a definitive hand boundary + outcome.
             try:
                 from ..vision.result import ResultReader
@@ -150,15 +174,17 @@ def run(a):
                 if frame is None or frame.size == 0 or min(frame.shape[:2]) < 10:
                     text = f"{a.game}: game window not visible (focus Judgment)..."
                 elif a.game == "blackjack":
+                    # read the felt once: per-cluster for strategy, flattened for counting
+                    card_reads = read_clusters(frame, rank_rec) if rank_rec is not None else None
                     if result_reader is not None and shoe is not None:
                         cue = result_reader.read(frame)
                         if cue and cue != prev_cue:   # banner just appeared -> hand ended
                             shoe.end_hand(cue)
                         prev_cue = cue
                     if shoe is not None:
-                        shoe.observe(read_ranks(frame, rank_rec))
+                        shoe.observe([r for cl in (card_reads or []) for r in cl])
                     text = blackjack_text(reader, frame, roi_cfg,
-                                          shoe.true_count if shoe else None)
+                                          shoe.true_count if shoe else None, card_reads)
                     if shoe is not None:
                         text += "\n" + count_line(shoe)
                 else:

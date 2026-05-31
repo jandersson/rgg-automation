@@ -40,12 +40,15 @@ def read_cluster_ranks(frame_bgr, cluster, recognizer,
             for label, score, (bx, by, bw, bh) in out]
 
 
+def read_clusters(frame_bgr, recognizer, **kw):
+    """Per-cluster rank reads: a list of rank-int lists, one per card cluster
+    (each top-to-bottom). Lets the caller tell the player's hand from the
+    dealer's by matching a cluster's blackjack total to the reliable HUD total."""
+    return [[label for label, _s, _b in read_cluster_ranks(frame_bgr, cl, recognizer, **kw)]
+            for cl in find_card_clusters(frame_bgr)]
+
+
 def read_ranks(frame_bgr, recognizer, **kw):
-    """Every recognised rank in the frame as a flat list of rank ints, ordered
-    top-to-bottom across all clusters. Order is informational — counting only
-    needs the multiset."""
-    dets = []
-    for cluster in find_card_clusters(frame_bgr):
-        dets.extend(read_cluster_ranks(frame_bgr, cluster, recognizer, **kw))
-    dets.sort(key=lambda d: d[2][1])  # absolute y
-    return [label for label, _score, _box in dets]
+    """Every recognised rank in the frame as a flat list of rank ints. Order is
+    informational — counting only needs the multiset."""
+    return [r for cluster in read_clusters(frame_bgr, recognizer, **kw) for r in cluster]
