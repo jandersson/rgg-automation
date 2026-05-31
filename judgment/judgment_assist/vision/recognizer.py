@@ -59,16 +59,21 @@ class CardRecognizer:
         self.mode = mode
         self.min_confidence = min_confidence
         label_of = _LABELERS[mode]
-        self.templates = {}  # label (tuple|int) -> grayscale image
-        for path in glob.glob(os.path.join(template_dir, "*.png")):
+        # label (tuple|int) -> list of grayscale exemplar images. Multiple
+        # exemplars per rank cover suit/colour variation (a red 9-diamonds vs a
+        # black 9-spades correlate differently in grayscale); matching takes the
+        # best over all exemplars. Files are '<label>.png' or '<label>_<tag>.png'
+        # (e.g. Q.png, Q_clubs.png) — the part before '_' is the label.
+        self.templates = {}
+        for path in sorted(glob.glob(os.path.join(template_dir, "*.png"))):
             stem = os.path.splitext(os.path.basename(path))[0]
             try:
-                label = label_of(stem)  # also filters out the other mode's files
+                label = label_of(stem.split("_")[0])  # also filters the other mode's files
             except ValueError:
                 continue
             img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
             if img is not None:
-                self.templates[label] = img
+                self.templates.setdefault(label, []).append(img)
         if not self.templates:
             raise RuntimeError(
                 f"no {mode} templates found in {template_dir!r} — build them "
@@ -81,11 +86,12 @@ class CardRecognizer:
         gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
         h, w = gray.shape[:2]
         best_label, best_score = None, -1.0
-        for label, tmpl in self.templates.items():
-            t = cv2.resize(tmpl, (w, h))
-            score = float(cv2.matchTemplate(gray, t, cv2.TM_CCOEFF_NORMED).max())
-            if score > best_score:
-                best_label, best_score = label, score
+        for label, exemplars in self.templates.items():
+            for tmpl in exemplars:
+                t = cv2.resize(tmpl, (w, h))
+                score = float(cv2.matchTemplate(gray, t, cv2.TM_CCOEFF_NORMED).max())
+                if score > best_score:
+                    best_label, best_score = label, score
         if best_score < self.min_confidence:
             return None, best_score
         return best_label, best_score
@@ -124,14 +130,15 @@ class CardRecognizer:
         gray = cv2.cvtColor(region_bgr, cv2.COLOR_BGR2GRAY)
         H, W = gray.shape[:2]
         dets = []  # (score, label, x, y, w, h)
-        for label, tmpl in self.templates.items():
-            th, tw = tmpl.shape[:2]
-            if th > H or tw > W:
-                continue
-            res = cv2.matchTemplate(gray, tmpl, cv2.TM_CCOEFF_NORMED)
-            ys, xs = np.where(res >= min_score)
-            for y, x in zip(ys.tolist(), xs.tolist()):
-                dets.append((float(res[y, x]), label, x, y, tw, th))
+        for label, exemplars in self.templates.items():
+            for tmpl in exemplars:
+                th, tw = tmpl.shape[:2]
+                if th > H or tw > W:
+                    continue
+                res = cv2.matchTemplate(gray, tmpl, cv2.TM_CCOEFF_NORMED)
+                ys, xs = np.where(res >= min_score)
+                for y, x in zip(ys.tolist(), xs.tolist()):
+                    dets.append((float(res[y, x]), label, x, y, tw, th))
         dets.sort(reverse=True)  # best score first
         kept = []
         for score, label, x, y, w, h in dets:
