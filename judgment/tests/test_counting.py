@@ -30,13 +30,25 @@ def test_hit_adds_only_the_new_card():
     assert sc.seen == 3 and sc.running == 1
 
 
-def test_table_clear_ends_hand_but_count_persists():
+def test_cue_ends_hand_then_next_hand_counts_fresh():
     sc = ShoeCounter(confirm=2, clear_frames=2)
-    _feed(sc, [[5, 6]] * 2)        # +2
-    _feed(sc, [[], []])            # table clears -> hand over
+    _feed(sc, [[5, 6]] * 2)        # +2, hand in progress
+    sc.end_hand("WIN")             # result banner -> hand ends
     assert sc.hands == 1
+    _feed(sc, [[], []])            # table clears -> suppression lifts
     _feed(sc, [[5, 6]] * 2)        # next hand: same ranks count again
-    assert sc.seen == 4 and sc.running == 4
+    assert sc.seen == 4 and sc.running == 4 and sc.hands == 1
+
+
+def test_pause_hiding_cards_is_not_a_hand_boundary():
+    # pausing/menus hide the cards for many frames; that must NOT bump the hand
+    # count or re-count the hand on resume (the reported overlay bug)
+    sc = ShoeCounter(confirm=2, clear_frames=2)
+    _feed(sc, [[10, 7]] * 2)       # hand in progress, -1
+    _feed(sc, [[]] * 8)            # long pause: cards hidden
+    assert sc.hands == 0
+    _feed(sc, [[10, 7]] * 2)       # resume: the same cards reappear
+    assert sc.seen == 2 and sc.running == -1 and sc.hands == 0
 
 
 def test_brief_no_card_blip_does_not_split_a_hand():

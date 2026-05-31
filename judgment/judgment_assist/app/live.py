@@ -162,7 +162,8 @@ def run(a):
         overlay = SuggestionOverlay(x=a.x, y=a.y)
 
     monitor = cfg.get("monitor", 1)
-    prev_cue = None  # last frame's result banner, for rising-edge hand-end detection
+    prev_cue = None      # last frame's result banner, for rising-edge hand-end detection
+    prev_busted = False  # last frame's bust state (bust shows no banner)
     print(f"live {a.game} advisor running (Ctrl-C to stop). overlay={'off' if a.no_overlay else 'on'}")
     try:
         with ScreenGrabber(monitor=monitor) as g:
@@ -182,6 +183,13 @@ def run(a):
                             shoe.end_hand(cue)
                         prev_cue = cue
                     if shoe is not None:
+                        # a bust shows a BUST! banner, but it's red text on the cards that
+                        # template-matches unreliably (false-matched the felt) -> use the HUD total
+                        pt, _ = reader.read_roi(frame, roi_cfg["player_total"])
+                        busted = pt is not None and pt > 21
+                        if busted and not prev_busted:
+                            shoe.end_hand("BUST")
+                        prev_busted = busted
                         shoe.observe([r for cl in (card_reads or []) for r in cl])
                     text = blackjack_text(reader, frame, roi_cfg,
                                           shoe.true_count if shoe else None, card_reads)

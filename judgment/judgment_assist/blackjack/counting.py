@@ -60,12 +60,14 @@ class ShoeCounter:
     A dealt card stays on screen for many frames, so naively counting every read
     would multiply-count it. Instead we track the current hand's rank multiset and
     only credit a rank when MORE of it appears than we've already counted (a hit or
-    a freshly revealed card). A hand ends only after a *sustained* run of card-free
-    frames (``clear_frames``) — a real between-hands gap lasts seconds, whereas the
-    brief no-card blips mid-hand (deal/hit animation, the result screen dimming the
-    table) are 1-2 frames; a single card frame resets the empty counter, so a blip
-    never splits one hand into two or double-counts its cards. The running count
-    carries across hands until ``reset()`` (a reshuffle / new shoe).
+    a freshly revealed card). A hand ends only on an EXPLICIT signal — the caller
+    calls ``end_hand`` when it sees the result banner (or a bust from the HUD).
+    Card-free frames are deliberately NOT treated as a hand boundary: pausing the
+    game (or any menu) hides the cards for many frames, and mistaking that for a
+    hand-end would falsely bump the hand count and re-count the hand on resume. A
+    sustained card-free run (``clear_frames``) only lifts the post-result
+    suppression (below). The running count carries across hands until ``reset()``
+    (a reshuffle / new shoe).
 
     Reads are noisy, so a frame's multiset must repeat for ``confirm`` consecutive
     frames before its growth is credited — a one-frame misread won't bump the count.
@@ -92,13 +94,11 @@ class ShoeCounter:
         """Feed the ranks (rank ints) visible this frame; ``ranks`` may be empty."""
         fc = Counter(int(r) for r in ranks)
         if not fc:
+            # No cards visible. This is NOT a hand boundary (could be a pause/menu);
+            # only lift the post-result suppression once the table has stayed clear.
             self._empty_n += 1
             if self._empty_n >= self.clear_frames:
-                if self._hand and not self._suppress:
-                    self.hands += 1         # sustained clear -> hand finished (no cue)
-                self._hand.clear()          # table cleared: lift suppression, ready for next
                 self._suppress = False
-                self._stable, self._stable_n = None, 0
             return
         self._empty_n = 0
         if self._suppress:
