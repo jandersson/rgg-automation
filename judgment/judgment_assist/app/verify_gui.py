@@ -65,6 +65,12 @@ class VerifyGUI:
         for n, lbl in enumerate(self.labels):
             self.root.bind(str(n + 1), lambda e, x=lbl: self._set(x))
         self._show()
+        # make sure the window actually pops to the front (not hidden behind the terminal)
+        self.root.update_idletasks()
+        self.root.lift()
+        self.root.attributes("-topmost", True)
+        self.root.after(400, lambda: self.root.attributes("-topmost", False))
+        self.root.focus_force()
 
     def _pred(self):
         return self.items[self.i].get("pred")
@@ -125,8 +131,12 @@ def build_banner_manifest(frames_dir="data/screens", results_dir="data/results",
         h, w = img.shape[:2]
         return (int(_BAND[0] * h), int(_BAND[1] * h), int(_BAND[2] * w), int(_BAND[3] * w))
 
+    files = sorted(glob.glob(os.path.join(frames_dir, "frame_*.png")))
+    print(f"scanning {len(files)} frames for result banners...")
     dets = []
-    for fn in sorted(glob.glob(os.path.join(frames_dir, "frame_*.png"))):
+    for n, fn in enumerate(files):
+        if n and n % 250 == 0:
+            print(f"  {n}/{len(files)}...")
         img = cv2.imread(fn)
         if img is None:
             continue
@@ -171,12 +181,20 @@ def build_banner_manifest(frames_dir="data/screens", results_dir="data/results",
 def main(argv=None):
     p = argparse.ArgumentParser(prog="judgment-assist verify-gui")
     p.add_argument("--banners", action="store_true",
-                   help="scan frames for result banners and verify them")
+                   help="verify result banners (reuses the last scan unless --rescan)")
+    p.add_argument("--rescan", action="store_true",
+                   help="re-scan all frames for banners first (~20s) instead of reusing")
     p.add_argument("--manifest", help="verify an existing manifest JSON")
     a = p.parse_args(argv)
     if a.banners:
-        man = build_banner_manifest()
-        print(f"{len(man['items'])} banner instances -> verifying")
+        mpath = "data/crops/_verify_banners/manifest.json"
+        if a.rescan or not os.path.exists(mpath):
+            man = build_banner_manifest()
+        else:
+            print(f"reusing {mpath} (pass --rescan to redo the frame scan)")
+            with open(mpath, encoding="utf-8") as f:
+                man = json.load(f)
+        print(f"{len(man['items'])} banner instances -> launching window...")
     elif a.manifest:
         with open(a.manifest, encoding="utf-8") as f:
             man = json.load(f)
