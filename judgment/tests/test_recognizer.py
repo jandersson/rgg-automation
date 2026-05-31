@@ -7,7 +7,7 @@ np = pytest.importorskip("numpy")
 cv2 = pytest.importorskip("cv2")
 
 from judgment_assist.vision.recognizer import CardRecognizer
-from judgment_assist.cards import RANK_TO_INT, parse_card
+from judgment_assist.cards import RANK_TO_INT, INT_TO_RANK, parse_card
 
 
 def _glyph(text):
@@ -68,6 +68,20 @@ def test_below_confidence_returns_none(tmp_path):
     # a rank not in the library shouldn't match anything strongly
     label, score = rec.recognize(_glyph("5"))
     assert label is None, (label, score)
+
+
+def test_scan_ranks_reads_stacked_glyphs_top_to_bottom(tmp_path):
+    d = tmp_path / "t"; d.mkdir()
+    for n in ["A", "K", "9", "5"]:
+        _write(d, n, _glyph(n))
+    rec = CardRecognizer(str(d), mode="rank", min_confidence=0.5)
+    # a tall corner strip with a 9 near the top and a 5 lower down (a 2-card cascade)
+    region = np.zeros((300, 60, 3), dtype=np.uint8)
+    region[20:68, 10:46] = _glyph("9")
+    region[180:228, 10:46] = _glyph("5")
+    out = rec.scan_ranks(region, min_score=0.6)
+    labels = [INT_TO_RANK[label] for label, _score, _box in out]
+    assert labels == ["9", "5"], (labels, out)
 
 
 def test_empty_library_raises(tmp_path):

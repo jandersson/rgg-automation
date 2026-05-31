@@ -100,6 +100,49 @@ class CardRecognizer:
                 labels.append(label)
         return labels
 
+    def scan_ranks(self, region_bgr, min_score=0.6, merge_dist=None):
+        """Slide every template over ``region_bgr`` (a card cluster's corner strip)
+        and return matches top-to-bottom: ``[(label, score, (x, y, w, h)), ...]``.
+
+        Unlike ``recognize`` (one ROI -> one label), this finds glyphs *wherever*
+        they sit in the region, so a cascade of overlapping cards is read without
+        needing per-card ROI segmentation (the fragile part). The mirrored
+        bottom-corner indices are 180°-rotated and don't match the upright
+        templates.
+
+        Validated on real frames: number/ace/ten ranks (the count-relevant bulk)
+        score >=0.66 and read correctly even in overlapping cascades; the weakest
+        spurious match (the low-contrast Q glyph against card decoration) tops out
+        ~0.58, so ``min_score=0.6`` separates them cleanly. Court letters (J/Q/K)
+        sit at the extreme card corner and scan-match weakly — improving those is
+        tracked separately; raising ``min_score`` would otherwise misread them.
+
+        Matches within ``merge_dist`` px (vertically) collapse to the
+        highest-scoring one — that dedupes both the correlation plateau around a
+        glyph and several templates peaking on the same glyph. Cards cascade with
+        an offset far larger than a glyph, so distinct cards survive."""
+        gray = cv2.cvtColor(region_bgr, cv2.COLOR_BGR2GRAY)
+        H, W = gray.shape[:2]
+        dets = []  # (score, label, x, y, w, h)
+        for label, tmpl in self.templates.items():
+            th, tw = tmpl.shape[:2]
+            if th > H or tw > W:
+                continue
+            res = cv2.matchTemplate(gray, tmpl, cv2.TM_CCOEFF_NORMED)
+            ys, xs = np.where(res >= min_score)
+            for y, x in zip(ys.tolist(), xs.tolist()):
+                dets.append((float(res[y, x]), label, x, y, tw, th))
+        dets.sort(reverse=True)  # best score first
+        kept = []
+        for score, label, x, y, w, h in dets:
+            cy = y + h / 2.0
+            tol = merge_dist if merge_dist is not None else max(12, 0.5 * h)
+            if any(abs(cy - (ky + kh / 2.0)) < tol for _, _, _, ky, _, kh in kept):
+                continue
+            kept.append((score, label, x, y, w, h))
+        kept.sort(key=lambda d: d[3])  # top-to-bottom
+        return [(label, score, (x, y, w, h)) for score, label, x, y, w, h in kept]
+
     def label_str(self, label):
         """Human-readable form of a label, for either mode."""
         return card_str(label) if self.mode == "card" else INT_TO_RANK[label]
