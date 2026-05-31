@@ -13,6 +13,24 @@ import sys
 
 _IS_WINDOWS = sys.platform == "win32"
 
+
+def _select_window(matches, needle):
+    """Pick the best window from title-substring ``matches`` (``[(hwnd, title,
+    area)]``) for the lowercased query ``needle``.
+
+    Prefers an **exact** (case-insensitive) title match, so a query of
+    ``"Judgment"`` selects the game window and not our own ``"judgment-assist"``
+    overlay (which also contains the substring). Failing an exact match it takes
+    the **largest** window by client area — the game dwarfs the tiny overlay
+    strip. Returns ``(hwnd, title)`` or ``None``."""
+    if not matches:
+        return None
+    for hwnd, title, _area in matches:
+        if title.lower() == needle:
+            return hwnd, title
+    hwnd, title, _area = max(matches, key=lambda m: m[2])
+    return hwnd, title
+
 if _IS_WINDOWS:
     import ctypes
     from ctypes import wintypes
@@ -50,13 +68,17 @@ if _IS_WINDOWS:
         return out
 
     def find_window(title_substring):
-        """First visible window whose title contains ``title_substring`` (case
-        insensitive). Returns ``(hwnd, title)`` or ``(None, None)``."""
+        """Visible window whose title contains ``title_substring`` (case
+        insensitive), preferring an exact match then the largest window so we
+        target the game and not our own overlay. ``(hwnd, title)`` or ``(None,
+        None)``."""
         needle = title_substring.lower()
+        matches = []
         for hwnd, title in list_windows():
             if needle in title.lower():
-                return hwnd, title
-        return None, None
+                r = client_region(hwnd)
+                matches.append((hwnd, title, r["width"] * r["height"]))
+        return _select_window(matches, needle) or (None, None)
 
     def foreground_title():
         """Title of the window the user is currently focused on (or '')."""

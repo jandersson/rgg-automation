@@ -14,7 +14,9 @@ class SuggestionOverlay:
         import tkinter as tk
         self._tk = tk
         self.root = tk.Tk()
-        self.root.title("judgment-assist")
+        # Title must NOT contain "judgment" — the capture layer finds the game
+        # window by that substring and would otherwise grab this overlay instead.
+        self.root.title("rgg-advisor")
         self.root.overrideredirect(True)             # no title bar / border
         self.root.attributes("-topmost", True)
         try:
