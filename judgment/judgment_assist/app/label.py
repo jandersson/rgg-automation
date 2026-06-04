@@ -159,12 +159,14 @@ class LabelerGUI:
 RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K"]
 
 
-def build_card_task(frame_glob_or_paths, out_dir="data/crops/_cards", width_frac=0.55,
-                    pad=14, min_score=0.45):
+def build_card_task(frame_glob_or_paths, out_dir="data/crops/_cards", width_frac=0.50,
+                    pad=14, min_score=0.6, max_per_cluster=8):
     """Localize cards in each frame, crop each detected rank glyph (with a wide
     scan so down-and-left cascade edge cards are included), and write a task that
     asks for rank + colour per crop — the inputs needed to build/repair templates
-    and red exemplars. The reader's current guess rides along as ``pred``."""
+    and red exemplars. The reader's current guess rides along as ``pred``. At most
+    ``max_per_cluster`` highest-score glyphs per hand are kept (a hand is <=6
+    cards), so a noisy cluster can't flood the batch."""
     import cv2
     from ..vision.locate import find_card_clusters
     from ..vision.recognizer import CardRecognizer
@@ -182,8 +184,10 @@ def build_card_task(frame_glob_or_paths, out_dir="data/crops/_cards", width_frac
             continue
         stem = os.path.splitext(os.path.basename(fp))[0]
         for ci, cl in enumerate(find_card_clusters(im)):
-            for gi, (lbl, _sc, (x, y, w, h)) in enumerate(
-                    read_cluster_ranks(im, cl, rec, width_frac=width_frac, min_score=min_score)):
+            glyphs = read_cluster_ranks(im, cl, rec, width_frac=width_frac, min_score=min_score)
+            glyphs = sorted(glyphs, key=lambda g: -g[1])[:max_per_cluster]   # top by score
+            glyphs = sorted(glyphs, key=lambda g: g[2][1])                   # back to top-to-bottom
+            for gi, (lbl, _sc, (x, y, w, h)) in enumerate(glyphs):
                 y0, y1 = max(0, y - pad), min(im.shape[0], y + h + pad)
                 x0, x1 = max(0, x - pad), min(im.shape[1], x + w + pad)
                 crop = im[y0:y1, x0:x1]
