@@ -106,7 +106,8 @@ class CardRecognizer:
                 labels.append(label)
         return labels
 
-    def scan_ranks(self, region_bgr, min_score=0.6, merge_dist=None, floors=None):
+    def scan_ranks(self, region_bgr, min_score=0.6, merge_dist=None, floors=None,
+                   scales=(1.0, 0.9, 0.8)):
         """Slide every template over ``region_bgr`` (a card cluster's corner strip)
         and return matches top-to-bottom: ``[(label, score, (x, y, w, h)), ...]``.
 
@@ -135,17 +136,23 @@ class CardRecognizer:
         gray = cv2.cvtColor(region_bgr, cv2.COLOR_BGR2GRAY)
         H, W = gray.shape[:2]
         floors = floors or {}
+        # Cards render at slightly different sizes by cascade position (a lower
+        # card can be ~0.8x the template). Match each template at a few scales and
+        # keep the best -- measured: a 3 that scores 0.36 at 1.0x scores 0.92 at
+        # 0.8x. NMS below collapses the same glyph found at neighbouring scales.
         dets = []  # (score, label, x, y, w, h)
         for label, exemplars in self.templates.items():
             lbl_min = floors.get(label, min_score)
             for tmpl in exemplars:
-                th, tw = tmpl.shape[:2]
-                if th > H or tw > W:
-                    continue
-                res = cv2.matchTemplate(gray, tmpl, cv2.TM_CCOEFF_NORMED)
-                ys, xs = np.where(res >= lbl_min)
-                for y, x in zip(ys.tolist(), xs.tolist()):
-                    dets.append((float(res[y, x]), label, x, y, tw, th))
+                for s in scales:
+                    t = tmpl if s == 1.0 else cv2.resize(tmpl, None, fx=s, fy=s)
+                    th, tw = t.shape[:2]
+                    if th > H or tw > W or th < 8 or tw < 8:
+                        continue
+                    res = cv2.matchTemplate(gray, t, cv2.TM_CCOEFF_NORMED)
+                    ys, xs = np.where(res >= lbl_min)
+                    for y, x in zip(ys.tolist(), xs.tolist()):
+                        dets.append((float(res[y, x]), label, x, y, tw, th))
         dets.sort(reverse=True)  # best score first
         kept = []
         for score, label, x, y, w, h in dets:

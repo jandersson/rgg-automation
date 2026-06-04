@@ -24,15 +24,16 @@ from .locate import find_card_clusters
 
 
 # The court-letter templates Q (12) and J (11) false-match grey card-interior
-# decoration up to ~0.63, while a real Q/J scores ~0.95 (measured on user-labeled
-# crops), so they get a higher floor. Validated: a 0.70 floor keeps all 30 real
-# J reads across the frame set and drops only the 3 confirmed false Js.
-RANK_FLOORS = {11: 0.70, 12: 0.70}
+# decoration, while a real Q/J scores ~0.95 (measured on user-labeled crops), so
+# they get a higher floor. 0.73 holds under multi-scale matching, where the
+# magnets get extra chances to false-match (a 0.8x Q hit exactly 0.70); validated
+# to drop every confirmed false J/Q while keeping all real court-card reads.
+RANK_FLOORS = {11: 0.73, 12: 0.73}
 
 
 def read_cluster_ranks(frame_bgr, cluster, recognizer,
                        left_pad=35, up_pad=15, width_frac=0.50, min_score=0.6,
-                       floors=None):
+                       floors=None, scales=None):
     """Ranks in one cluster, top-to-bottom: ``[(label, score, (x, y, w, h)), ...]``
     with boxes in absolute frame coords. ``label`` is a rank int.
 
@@ -47,8 +48,9 @@ def read_cluster_ranks(frame_bgr, cluster, recognizer,
     region = frame_bgr[y0:cy + ch, x0:x1]
     if region.size == 0:
         return []
+    kw = {} if scales is None else {"scales": scales}
     out = recognizer.scan_ranks(region, min_score=min_score,
-                                floors=RANK_FLOORS if floors is None else floors)
+                                floors=RANK_FLOORS if floors is None else floors, **kw)
     return [(label, score, (x0 + bx, y0 + by, bw, bh))
             for label, score, (bx, by, bw, bh) in out]
 
