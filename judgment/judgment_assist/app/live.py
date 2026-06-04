@@ -60,13 +60,25 @@ def _insurance(dealer, true_count):
 
 
 def match_player_hand(card_reads, total):
-    """The read cluster whose blackjack total equals ``total`` — i.e. the
-    player's hand, identified and validated via the reliable HUD total. Returns
-    None if no clean read matches, so the caller falls back to totals-only advice."""
+    """The player's hand among the read clusters, identified and validated via
+    the reliable HUD total. Returns the matching ranks, or None (→ totals-only).
+
+    The localizer routinely SPLITS one hand into several single-card clusters
+    when the cards are spaced rather than tightly cascaded (e.g. a 10 and a 9
+    sitting apart read as ``[[10], [9]]``, neither of which equals 19), so we
+    can't just compare each cluster to the total. The play-area gate already
+    excludes the other seats, so the in-frame clusters are the player's own
+    cards: we look for the combination of clusters whose combined blackjack total
+    equals the HUD total, preferring the one that uses the MOST clusters (the
+    whole hand). A lone noise/dealer cluster is dropped by trying smaller subsets."""
+    from itertools import combinations
     from ..blackjack.strategy import hand_total
-    for ranks in (card_reads or []):
-        if ranks and hand_total(ranks)[0] == total:
-            return ranks
+    clusters = [c for c in (card_reads or []) if c]
+    for k in range(len(clusters), 0, -1):       # most clusters first = whole hand
+        for combo in combinations(clusters, k):
+            ranks = [r for c in combo for r in c]
+            if hand_total(ranks)[0] == total:
+                return ranks
     return None
 
 
