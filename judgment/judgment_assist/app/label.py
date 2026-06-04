@@ -155,7 +155,8 @@ class LabelerGUI:
             b.config(bg=bg, fg=fg)
         preds = "  ".join(f"{n}={self.s.pred_for(n)}" for n in self.s.field_names
                           if self.s.pred_for(n) is not None)
-        self.predL.config(text=(f"prediction: {preds}   (Enter to accept all)" if preds else ""))
+        self.predL.config(text=(f"prediction: {preds}   (Enter = accept these for THIS card)"
+                                 if preds else ""))
         vals = "  ".join(f"{n}={self.s.value(n) or '—'}" for n in self.s.field_names)
         skipped = self.s.results.get(item["id"], {}).get(SKIP)
         self.info.config(text=(f"[{self.s.i + 1}/{total}]  {done} done   "
