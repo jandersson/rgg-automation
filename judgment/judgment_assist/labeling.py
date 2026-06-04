@@ -122,6 +122,20 @@ class LabelSession:
                                   if self.field_names[k] not in rec), len(self.fields) - 1)
         return self.is_complete()
 
+    def accept_predictions(self):
+        """Fill each still-EMPTY field with its prediction; fields you already set
+        (a correction) are kept, never overwritten. Returns True if the item is
+        now complete."""
+        if self.current() is None:
+            return False
+        for fidx, name in enumerate(self.field_names):
+            if self.value(name) is not None:
+                continue
+            pv = self.pred_for(name)
+            if pv is not None and pv in self.labels_for(fidx):
+                self.record(pv, fidx)
+        return self.is_complete()
+
     def skip(self):
         if not self.allow_skip:
             return

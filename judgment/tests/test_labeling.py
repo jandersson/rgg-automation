@@ -89,6 +89,28 @@ def test_pred_for_scalar_and_dict(tmp_path):
     assert s.pred_for("rank") == "4" and s.pred_for("color") == "red"
 
 
+def test_accept_predictions_keeps_corrections(tmp_path):
+    task = images_task(["x.png"], None, "?", str(tmp_path / "a.json"),
+                       fields=[{"name": "rank", "labels": ["3", "9"]},
+                               {"name": "color", "labels": ["red", "black"]}])
+    task["items"][0]["pred"] = {"rank": "9", "color": "red"}   # a wrong rank prediction
+    s = LabelSession(task)
+    s.record("3", 0)                       # user corrects rank 9 -> 3
+    assert s.accept_predictions() is True  # fills the empty colour, completes
+    assert s.value("rank") == "3"          # correction kept, NOT overwritten by pred 9
+    assert s.value("color") == "red"       # empty field took the prediction
+
+
+def test_accept_predictions_fills_all_when_untouched(tmp_path):
+    task = images_task(["y.png"], None, "?", str(tmp_path / "b.json"),
+                       fields=[{"name": "rank", "labels": ["4"]},
+                               {"name": "color", "labels": ["red", "black"]}])
+    task["items"][0]["pred"] = {"rank": "4", "color": "black"}
+    s = LabelSession(task)
+    assert s.accept_predictions() is True
+    assert s.value("rank") == "4" and s.value("color") == "black"
+
+
 def test_summary_excludes_skips(tmp_path):
     s, _ = _single(tmp_path)
     s.record("WIN"); s.next(); s.record("WIN"); s.next(); s.skip()

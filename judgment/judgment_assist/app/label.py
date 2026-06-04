@@ -111,10 +111,7 @@ class LabelerGUI:
             self._set(labels[n], fidx)
 
     def _accept_pred(self):
-        for fidx, name in enumerate(self.s.field_names):
-            pv = self.s.pred_for(name)
-            if pv is not None and pv in self.s.labels_for(fidx):
-                self.s.record(pv, fidx)
+        self.s.accept_predictions()   # fills only empty fields; keeps your corrections
         self.s.save()
         if self.s.is_complete():
             self._advance()
