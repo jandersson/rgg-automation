@@ -23,9 +23,11 @@ from __future__ import annotations
 from .locate import find_card_clusters
 
 
-# Q (label 12) false-matches grey card-interior decoration up to ~0.62 while a
-# real Q scores ~0.95 (measured on labeled crops), so it gets a higher floor.
-RANK_FLOORS = {12: 0.70}
+# The court-letter templates Q (12) and J (11) false-match grey card-interior
+# decoration up to ~0.63, while a real Q/J scores ~0.95 (measured on user-labeled
+# crops), so they get a higher floor. Validated: a 0.70 floor keeps all 30 real
+# J reads across the frame set and drops only the 3 confirmed false Js.
+RANK_FLOORS = {11: 0.70, 12: 0.70}
 
 
 def read_cluster_ranks(frame_bgr, cluster, recognizer,
