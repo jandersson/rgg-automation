@@ -159,6 +159,7 @@ def run(a):
                          f"run calibration first (mark --game {section})")
 
     rank_rec = shoe = read_clusters = result_reader = None
+    store = session_id = None
     if a.game == "blackjack":
         from ..vision.hud import HudReader
         reader = HudReader(a.digits, min_confidence=a.min_confidence)
@@ -179,15 +180,22 @@ def run(a):
         # the reader, so the count only ever sees a fraction of the shoe and is
         # NOT usable for betting (issue #3 — and only matters at all if the game
         # runs a persistent shoe, which is unconfirmed). --count enables it for dev.
-        if a.count and rank_rec is not None:
-            from ..blackjack.counting import ShoeCounter
-            shoe = ShoeCounter(decks=a.decks)
-            # Result-banner reader gives a definitive hand boundary + outcome.
+        # The result-banner reader gives definitive hand boundaries + outcomes,
+        # needed by BOTH counting and DB session logging.
+        if a.count or a.db:
             try:
                 from ..vision.result import ResultReader
                 result_reader = ResultReader(a.results)
             except RuntimeError as e:
                 print(f"  (result-cue detection off — {e})")
+        if a.count and rank_rec is not None:
+            from ..blackjack.counting import ShoeCounter
+            shoe = ShoeCounter(decks=a.decks)
+        if a.db:
+            from ..sessions import SessionStore
+            store = SessionStore(a.db)
+            session_id = store.start_session("blackjack", config=a.config)
+            print(f"  tracking hands to session {session_id} in {a.db}")
     else:
         from ..vision.recognizer import CardRecognizer
         reader = CardRecognizer(a.templates, mode="card", min_confidence=a.min_confidence)
@@ -200,6 +208,7 @@ def run(a):
     monitor = cfg.get("monitor", 1)
     prev_cue = None      # last frame's result banner, for rising-edge hand-end detection
     prev_busted = False  # last frame's bust state
+    hand_no = 0          # per-session finished-hand counter (for the DB)
     log_path = a.log if a.game == "blackjack" else None
     misses_dir = a.save_misses if a.game == "blackjack" else None
     miss_streak, miss_saved = 0, False
@@ -220,32 +229,46 @@ def run(a):
                 elif a.game == "blackjack":
                     # read the felt once: per-cluster for strategy, flattened for counting
                     card_reads = read_clusters(frame, rank_rec) if rank_rec is not None else None
-                    pt = None
-                    if result_reader is not None and shoe is not None:
-                        cue = result_reader.read(frame)
-                        # banner just appeared -> hand ended; log once if it really ended
-                        if cue and cue != prev_cue and shoe.end_hand(cue) and log_path:
-                            log_hand(log_path, shoe)
-                        prev_cue = cue
-                    if shoe is not None:
-                        # a bust is detected as a BUST! cue above; HUD player total > 21 is a
-                        # cheap independent fallback if the banner read is missed on a frame.
+                    # HUD totals: needed for bust detection, the DB row, and miss-saving.
+                    pt = dealer_up = None
+                    if result_reader is not None or shoe is not None or misses_dir:
                         pt, _ = reader.read_roi(frame, roi_cfg["player_total"])
-                        busted = pt is not None and pt > 21
-                        if busted and not prev_busted and shoe.end_hand("BUST") and log_path:
+                        dealer_up, _ = reader.read_roi(frame, roi_cfg["dealer_total"])
+                    busted = pt is not None and pt > 21
+                    # One hand boundary per frame: the result banner just appeared, or
+                    # (fallback, if the banner read was missed) the HUD total crossed 21.
+                    outcome = None
+                    if result_reader is not None:
+                        cue = result_reader.read(frame)
+                        if cue and cue != prev_cue:
+                            outcome = cue
+                        prev_cue = cue
+                    if outcome is None and busted and not prev_busted:
+                        outcome = "BUST"
+                    prev_busted = busted
+                    if outcome is not None:
+                        hand_no += 1
+                        if shoe is not None and shoe.end_hand(outcome) and log_path:
                             log_hand(log_path, shoe)
-                        prev_busted = busted
+                        if store is not None:
+                            store.record_hand(
+                                session_id, hand_no, outcome=outcome,
+                                player_total=pt, dealer_up=dealer_up,
+                                running=shoe.running if shoe else None,
+                                true_count=shoe.true_count if shoe else None,
+                                cards_seen=shoe.seen if shoe else None)
+                    if shoe is not None:
                         shoe.observe([r for cl in (card_reads or []) for r in cl])
-                        # save frames where the read disagrees with the HUD total (reader
-                        # misses) for later analysis — only sustained mismatches, once each
-                        if misses_dir and card_reads and pt is not None and 2 <= pt <= 21:
-                            if match_player_hand(card_reads, pt) is None:
-                                miss_streak += 1
-                                if miss_streak == 3 and not miss_saved:
-                                    save_miss(misses_dir, frame, pt, card_reads)
-                                    miss_saved = True
-                            else:
-                                miss_streak, miss_saved = 0, False
+                    # save frames where the read disagrees with the HUD total (reader
+                    # misses) for later analysis — only sustained mismatches, once each
+                    if misses_dir and card_reads and pt is not None and 2 <= pt <= 21:
+                        if match_player_hand(card_reads, pt) is None:
+                            miss_streak += 1
+                            if miss_streak == 3 and not miss_saved:
+                                save_miss(misses_dir, frame, pt, card_reads)
+                                miss_saved = True
+                        else:
+                            miss_streak, miss_saved = 0, False
                     text = blackjack_text(reader, frame, roi_cfg,
                                           shoe.true_count if shoe else None, card_reads)
                     if shoe is not None:
@@ -260,6 +283,9 @@ def run(a):
     except KeyboardInterrupt:
         print("\nstopped.")
     finally:
+        if store is not None:
+            store.close_session(session_id)
+            store.close()
         if overlay:
             overlay.close()
 
@@ -282,6 +308,9 @@ def main(argv=None):
     p.add_argument("--count", action="store_true",
                    help="EXPERIMENTAL: enable Hi-Lo card counting (off by default — "
                         "multi-seat table, the count can't see most of the shoe; issue #3)")
+    p.add_argument("--db", default=None,
+                   help="track sessions+hands to a SQLite DB (one session per run; "
+                        "one row per finished hand). Analyse with `-m judgment_assist.app.sessions`")
     p.add_argument("--log", default=None,
                    help="append a CSV row per finished hand (outcome + running/true count)")
     p.add_argument("--save-misses", dest="save_misses", default=None,
