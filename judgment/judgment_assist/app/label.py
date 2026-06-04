@@ -62,6 +62,9 @@ class LabelerGUI:
         self.prompt = tk.Label(self.root, text=self.s.prompt, font=("Consolas", 13, "bold"),
                                fg="#cde", bg="#101010", wraplength=620, justify="left")
         self.prompt.pack(fill="x", padx=8)
+        self.predL = tk.Label(self.root, font=("Consolas", 11), fg="#e8c060",
+                              bg="#101010", justify="left")
+        self.predL.pack(fill="x", padx=8)
 
         self.field_frames = []
         for fidx, f in enumerate(self.s.fields):
@@ -108,9 +111,15 @@ class LabelerGUI:
             self._set(labels[n], fidx)
 
     def _accept_pred(self):
-        pred = (self.s.current() or {}).get("pred")
-        if pred is not None and pred in self.s.labels_for(0):
-            self._set(pred, 0)
+        for fidx, name in enumerate(self.s.field_names):
+            pv = self.s.pred_for(name)
+            if pv is not None and pv in self.s.labels_for(fidx):
+                self.s.record(pv, fidx)
+        self.s.save()
+        if self.s.is_complete():
+            self._advance()
+        else:
+            self._show()
 
     def _set(self, label, fidx):
         complete = self.s.record(label, fidx)
@@ -133,15 +142,23 @@ class LabelerGUI:
         self.imgL.config(image=self._photo, text="" if self._photo else "(image unreadable)")
         done, total = self.s.progress()
         for (fidx, lbl), b in self._btns.items():
-            v = self.s.value(self.s.field_names[fidx])
+            name = self.s.field_names[fidx]
+            v = self.s.value(name)
+            predicted = (self.s.pred_for(name) == lbl)
             active = (fidx == self.s.active_field)
-            b.config(bg=_ACTIVE if v == lbl else (_IDLE if not active else "#1f3a1f"),
-                     fg="#000" if v == lbl else "#eee")
+            if v == lbl:
+                bg, fg = _ACTIVE, "#000"            # chosen
+            elif predicted:
+                bg, fg = "#5a4a18", "#ffe"          # predicted, not yet chosen
+            else:
+                bg, fg = ("#1f3a1f" if active else _IDLE), "#eee"
+            b.config(bg=bg, fg=fg)
+        preds = "  ".join(f"{n}={self.s.pred_for(n)}" for n in self.s.field_names
+                          if self.s.pred_for(n) is not None)
+        self.predL.config(text=(f"prediction: {preds}   (Enter to accept all)" if preds else ""))
         vals = "  ".join(f"{n}={self.s.value(n) or '—'}" for n in self.s.field_names)
-        pred = item.get("pred")
-        ptxt = f"   pred:{pred}" if pred is not None else ""
         skipped = self.s.results.get(item["id"], {}).get(SKIP)
-        self.info.config(text=(f"[{self.s.i + 1}/{total}]  {done} done{ptxt}   "
+        self.info.config(text=(f"[{self.s.i + 1}/{total}]  {done} done   "
                                f"you: {'SKIP' if skipped else vals}\n{os.path.basename(item['image'])}"))
 
     def _quit(self):
@@ -157,6 +174,17 @@ class LabelerGUI:
 # --- task builders --------------------------------------------------------
 
 RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K"]
+
+
+def glyph_color(crop_bgr, red_frac=0.02):
+    """Predict 'red' or 'black' for a card-rank crop. The red ink has R well above
+    G/B; measured, a red glyph fills ~6% of the crop with strongly-red pixels vs
+    ~0.5% for a black one (stray edges), so a 2% floor separates them cleanly.
+    Hue is unreliable here — the cream card + green felt skew the mean hue."""
+    import cv2
+    b, g, r = cv2.split(crop_bgr.astype("int16"))
+    redness = r - (g + b) // 2
+    return "red" if float((redness > 30).mean()) > red_frac else "black"
 
 
 def build_card_task(frame_glob_or_paths, out_dir="data/crops/_cards", width_frac=0.50,
@@ -177,7 +205,7 @@ def build_card_task(frame_glob_or_paths, out_dir="data/crops/_cards", width_frac
              else list(frame_glob_or_paths))
     rec = CardRecognizer("data/templates", mode="rank", min_confidence=min_score)
     os.makedirs(out_dir, exist_ok=True)
-    items, preds = [], {}
+    items = []
     for fp in paths:
         im = cv2.imread(fp)
         if im is None:
@@ -193,12 +221,12 @@ def build_card_task(frame_glob_or_paths, out_dir="data/crops/_cards", width_frac
                 crop = im[y0:y1, x0:x1]
                 if crop.size == 0:
                     continue
+                color = glyph_color(crop)
                 crop = cv2.resize(crop, None, fx=4, fy=4, interpolation=cv2.INTER_NEAREST)
                 cpath = os.path.join(out_dir, f"{stem}_c{ci}_g{gi}.png")
                 cv2.imwrite(cpath, crop)
                 items.append({"id": f"{stem}#{ci}.{gi}", "image": cpath,
-                              "pred": INT_TO_RANK[lbl]})
-                preds[cpath] = INT_TO_RANK[lbl]
+                              "pred": {"rank": INT_TO_RANK[lbl], "color": color}})
     task = {"title": "Card rank + colour", "prompt": "Rank and colour of THIS card?",
             "fields": [{"name": "rank", "labels": RANKS},
                        {"name": "color", "labels": ["red", "black"]}],

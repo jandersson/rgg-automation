@@ -1,7 +1,21 @@
 """Tests for the GUI-free labeling core."""
 import json
 
+import pytest
+
 from judgment_assist.labeling import LabelSession, images_task, SKIP
+
+
+def test_glyph_color_red_vs_black():
+    cv2 = pytest.importorskip("cv2")
+    import numpy as np
+    from judgment_assist.app.label import glyph_color
+    cream = np.full((120, 90, 3), (205, 215, 210), np.uint8)  # BGR card body
+    red, black = cream.copy(), cream.copy()
+    cv2.putText(red, "4", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 2, (40, 40, 200), 6)   # red ink
+    cv2.putText(black, "4", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 2, (30, 30, 30), 6)  # black ink
+    assert glyph_color(red) == "red"
+    assert glyph_color(black) == "black"
 
 
 def _single(tmp_path):
@@ -60,6 +74,19 @@ def test_save_and_resume(tmp_path):
     assert s2.progress() == (2, 3)
     # resumed item starts on its first empty field
     assert json.load(open(out))["b.png"] == {"label": "LOSE"}
+
+
+def test_pred_for_scalar_and_dict(tmp_path):
+    # scalar pred applies to the first field only
+    task = images_task(["a.png"], None, "?", str(tmp_path / "s.json"),
+                       fields=[{"name": "rank", "labels": ["4"]},
+                               {"name": "color", "labels": ["red", "black"]}],
+                       preds={"a.png": "4"})
+    s = LabelSession(task)
+    assert s.pred_for("rank") == "4" and s.pred_for("color") is None
+    # dict pred carries a value per field
+    s.items[0]["pred"] = {"rank": "4", "color": "red"}
+    assert s.pred_for("rank") == "4" and s.pred_for("color") == "red"
 
 
 def test_summary_excludes_skips(tmp_path):

@@ -84,6 +84,18 @@ class LabelSession:
     def labels_for(self, field_idx):
         return self.fields[field_idx]["labels"]
 
+    def pred_for(self, field_name, item=None):
+        """The prediction for one field. ``item['pred']`` may be a dict
+        ({field: value}) for per-field predictions, or a scalar that applies to
+        the first field only (back-compat with single-field tasks)."""
+        it = item or self.current()
+        if not it:
+            return None
+        p = it.get("pred")
+        if isinstance(p, dict):
+            return p.get(field_name)
+        return p if field_name == self.field_names[0] else None
+
     def value(self, field_name, item_id=None):
         rec = self.results.get(item_id or self.current_id(), {})
         return rec.get(field_name)
