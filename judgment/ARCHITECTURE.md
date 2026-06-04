@@ -62,17 +62,19 @@ The code is done; what's left needs the game on screen (one-time, ~10 min):
 3. `calibrate mark --game blackjack --window Judgment` (box the corner ranks) and
    `--game poker` (box whole cards) → writes `config/regions.json`.
 4. `uv run python -m judgment_assist.app.live blackjack` (or `poker`) → overlay shows the
-   play. Auto card-counting across hands and chip-count OCR are the next code
-   steps once the read is proven reliable.
+   play. Blackjack hands are logged to a SQLite DB by default (`--no-db` to
+   disable; analyse with `-m judgment_assist.app.sessions`).
 
 Start with blackjack: fewer ROIs, a static turn-based screen, a deterministic
 (lookup) decision, and only 13 suit-agnostic templates to collect.
 
 ## Open empirical questions (the tool will answer these)
 
-1. **Blackjack deck count & reshuffle.** Track every card seen; flag when a card
-   already seen "this shoe" reappears (⇒ reshuffle) and estimate deck count from
-   the reshuffle cadence. Decides whether Hi-Lo counting has any edge.
+1. **Blackjack deck count & reshuffle — RESOLVED (counting retired).** It's a
+   multi-seat table: other players' and the dealer's cards sit angled/clipped at
+   the edges, so the reader can't observe most of the shoe → Hi-Lo counting isn't
+   usable for betting regardless of reshuffle behaviour. Counting is experimental
+   and off by default (`--count`); the HUD-total advice is the product.
 2. **Poker opponent count & whether opponents fold pre-showdown.** Equity is
    computed vs the *active* opponent count; we read that from the table state.
 3. **Exact screen resolution / window mode** for the ROI config.

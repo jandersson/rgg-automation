@@ -229,7 +229,8 @@ def run(a):
         # runs a persistent shoe, which is unconfirmed). --count enables it for dev.
         # The result-banner reader gives definitive hand boundaries + outcomes,
         # needed by BOTH counting and DB session logging.
-        if a.count or a.db:
+        db_on = bool(a.db) and not a.no_db
+        if a.count or db_on:
             try:
                 from ..vision.result import ResultReader
                 result_reader = ResultReader(a.results)
@@ -238,7 +239,7 @@ def run(a):
         if a.count and rank_rec is not None:
             from ..blackjack.counting import ShoeCounter
             shoe = ShoeCounter(decks=a.decks)
-        if a.db:
+        if db_on:
             from ..sessions import SessionStore
             store = SessionStore(a.db)
             session_id = store.start_session("blackjack", config=a.config)
@@ -347,9 +348,11 @@ def main(argv=None):
     p.add_argument("--count", action="store_true",
                    help="EXPERIMENTAL: enable Hi-Lo card counting (off by default — "
                         "multi-seat table, the count can't see most of the shoe; issue #3)")
-    p.add_argument("--db", default=None,
-                   help="track sessions+hands to a SQLite DB (one session per run; "
-                        "one row per finished hand). Analyse with `-m judgment_assist.app.sessions`")
+    p.add_argument("--db", default="data/sessions/sessions.db",
+                   help="SQLite DB for session/hand logging (blackjack; ON by default, "
+                        "one session per run, one row per finished hand). "
+                        "Analyse with `-m judgment_assist.app.sessions`")
+    p.add_argument("--no-db", action="store_true", help="disable session DB logging")
     p.add_argument("--log", default=None,
                    help="append a CSV row per finished hand (outcome + running/true count)")
     p.add_argument("--save-misses", dest="save_misses", default=None,

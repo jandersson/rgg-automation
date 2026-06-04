@@ -18,14 +18,16 @@ opponents at the table. So the right question is *"what's my equity vs N
 opponents given the board?"* plus pot odds — not a draw-discard calc.
 
 **Blackjack** — standard 21 with these house rules:
-- Blackjack pays **2.5×** the bet (i.e. 3:2).
-- **Six-Card Charlie**: hold 6 cards without busting → automatic win. This is a
-  real strategy lever (it pays to keep hitting a stiff hand once you're at 5).
-- Insurance offered on dealer Ace; push returns the bet.
-- **Unknown / to be measured:** number of decks and whether the shoe is
-  reshuffled every hand. *Card counting only helps if the game keeps a
-  persistent shoe.* The tool tracks cards seen across hands so we can detect
-  reshuffles and confirm whether counting is worth anything here.
+- Dealer **stands on 17 (S17)**; **late surrender** offered; blackjack pays **3:2**.
+- **Six-Card Charlie**: hold 6 cards without busting → automatic win. A real
+  strategy lever (it pays to keep hitting a stiff hand once you're at 5).
+- **Split** offered on a pair; insurance on dealer Ace; push returns the bet.
+- **Multi-seat table → counting retired.** Other players and the dealer are dealt
+  from the same shoe, but their cards sit angled/clipped at the screen edges, so
+  the reader can't see most of the shoe and Hi-Lo counting isn't usable for
+  betting (and the shoe may reshuffle each hand anyway — unconfirmed). Counting is
+  therefore **experimental and off by default** (`--count`). The reliable product
+  is the **HUD-total move advice**, which is unaffected.
 
 ## Setup (uv)
 
@@ -73,6 +75,31 @@ Poker uses full cards (suits matter for flushes), so build its library with the
 default card mode: `calibrate templates --window Judgment` (all 52) and
 `calibrate mark --game poker --window Judgment`.
 
+The card reader matches rank glyphs at multiple scales (cards render smaller in
+some cascade positions) with per-rank score floors for the court letters (Q/J
+false-match grey card decoration). It reads the player's own hand to upgrade the
+advice to double/split/soft; if a card is misread it falls back to correct
+totals-only advice, so a bad read never gives wrong advice.
+
+## Session logging & tooling
+
+The live blackjack advisor logs every finished hand to a SQLite DB **by default**
+(`data/sessions/sessions.db`; pass `--no-db` to turn it off). It records the
+reliable signals — outcome, your total, the dealer up-card — one row per hand.
+Review outcomes, win/loss streaks, and a fair-deck dealer-distribution check with:
+
+```powershell
+uv run python -m judgment_assist.app.sessions data/sessions/sessions.db
+```
+
+To improve the card reader, label crops with the reusable GUI — it presents
+images, you tag rank+colour (predictions pre-filled), and the labels feed
+template/threshold fixes:
+
+```powershell
+uv run python -m judgment_assist.app.label --cards data/screens/frame_004*.png
+```
+
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full calibration walkthrough and
 the build-phase status.
 
@@ -87,11 +114,14 @@ judgment_assist/
     advisor.py        equity + pot odds -> recommendation
   blackjack/
     strategy.py       multi-deck basic strategy (+ count deviations)
-    counting.py       Hi-Lo running/true count + bet ramp
+    counting.py       Hi-Lo counter (experimental — see the multi-seat note above)
     engine.py         advisor tying strategy + counting + Six-Card Charlie
-  capture/            screen-region grab (mss) + calibration tool   [phase 2]
-  vision/             card recognition via template matching         [phase 2]
-  app/                live advisor loops + manual CLI                [phase 2]
-tests/                pytest suite for the brains
+  vision/             localize + recognise cards (multi-scale template match)
+  capture/            screen-region grab (mss) + calibration + crop harvesting
+  labeling.py         reusable image-labeling core (LabelSession)
+  sessions.py         SQLite session/hand telemetry + summary
+  app/                cli.py (manual), live.py (overlay), label.py (labeler GUI),
+                      sessions.py (report), verify_gui.py
+tests/                pytest suite (brains + vision + tooling)
 config/               regions.example.json -> copy to regions.json after calibration
 ```
