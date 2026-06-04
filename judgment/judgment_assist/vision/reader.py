@@ -23,10 +23,20 @@ from __future__ import annotations
 from .locate import find_card_clusters
 
 
+# Q (label 12) false-matches grey card-interior decoration up to ~0.62 while a
+# real Q scores ~0.95 (measured on labeled crops), so it gets a higher floor.
+RANK_FLOORS = {12: 0.70}
+
+
 def read_cluster_ranks(frame_bgr, cluster, recognizer,
-                       left_pad=35, up_pad=15, width_frac=0.40, min_score=0.6):
+                       left_pad=35, up_pad=15, width_frac=0.50, min_score=0.6,
+                       floors=None):
     """Ranks in one cluster, top-to-bottom: ``[(label, score, (x, y, w, h)), ...]``
-    with boxes in absolute frame coords. ``label`` is a rank int."""
+    with boxes in absolute frame coords. ``label`` is a rank int.
+
+    ``width_frac`` 0.50 reaches the rightmost corner index of a down-and-left
+    cascade (the top card sits furthest right); ``floors`` (default
+    ``RANK_FLOORS``) raises the bar for ranks whose template false-matches."""
     cx, cy, cw, ch = cluster
     H, W = frame_bgr.shape[:2]
     x0 = max(0, cx - left_pad)
@@ -35,7 +45,8 @@ def read_cluster_ranks(frame_bgr, cluster, recognizer,
     region = frame_bgr[y0:cy + ch, x0:x1]
     if region.size == 0:
         return []
-    out = recognizer.scan_ranks(region, min_score=min_score)
+    out = recognizer.scan_ranks(region, min_score=min_score,
+                                floors=RANK_FLOORS if floors is None else floors)
     return [(label, score, (x0 + bx, y0 + by, bw, bh))
             for label, score, (bx, by, bw, bh) in out]
 
