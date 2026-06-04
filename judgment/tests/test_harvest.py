@@ -20,8 +20,8 @@ FELT = (70, 120, 40)
 def _frame_with_card():
     f = np.zeros((H, W, 3), np.uint8)
     f[:] = FELT
-    # a solid cream card with a dark "7" rank glyph in the corner
-    f[350:520, 800:910] = (230, 235, 235)
+    # a solid cream card (realistic ~160x230px) with a dark "7" rank glyph
+    f[350:580, 800:960] = (230, 235, 235)
     cv2.putText(f, "7", (812, 392), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (20, 20, 20), 2)
     return f
 

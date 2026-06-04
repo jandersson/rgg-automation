@@ -6,8 +6,13 @@ promises:
   * a *cream* card (not bright white) is still found — guards the threshold bug
     where the gate (S<80, V>150) rejected the real cards (sampled ~S=87, V=110);
   * thin printed-text strokes are rejected (erosion dissolves them);
+  * a sub-card-width solid blob is rejected — bold felt-title strokes ("BLACK
+    JACK", "PAY 3 TO 2") survive erosion as narrow clusters and must not pass;
   * cascaded cards collapse to a single cluster.
-Real-frame coverage (cards found in 72/72 in_hand frames) is validated
+
+Card sizes here mirror measured reality (real on-screen cards are ~160-310px
+wide across data/screens), so the ``min_width`` floor behaves as in production.
+Real-frame coverage (cards found in 182/182 in_hand frames) is validated
 separately against data/screens, not in unit tests.
 """
 import numpy as np
@@ -33,7 +38,7 @@ def _hsv_bgr(h, s, v):
 
 def test_solid_card_is_found():
     f = _frame()
-    x, y, w, h = 800, 350, 100, 150
+    x, y, w, h = 800, 350, 160, 230
     f[y:y + h, x:x + w] = (250, 250, 250)
     clusters = find_card_clusters(f)
     assert len(clusters) == 1
@@ -46,8 +51,16 @@ def test_cream_card_is_found():
     old V>150,S<80 gate). A cream-filled card must still be located."""
     f = _frame()
     cream = _hsv_bgr(15, 85, 150)   # in the new gate's band, outside the old one
-    f[350:500, 800:900] = cream
+    f[350:580, 800:960] = cream
     assert len(find_card_clusters(f)) == 1
+
+
+def test_narrow_title_stroke_is_rejected():
+    """A solid, card-coloured but sub-card-width blob (a bold felt-title stroke
+    that survived erosion) must be dropped by the min_width floor."""
+    f = _frame()
+    f[300:500, 820:910] = (250, 250, 250)   # 90px wide — narrower than any card
+    assert find_card_clusters(f) == []
 
 
 def test_thin_text_is_rejected():
@@ -64,14 +77,14 @@ def test_blank_felt_has_no_cards():
 def test_cascade_is_one_cluster():
     f = _frame()
     for x, y in [(800, 350), (812, 392)]:
-        f[y:y + 150, x:x + 100] = (250, 250, 250)
+        f[y:y + 230, x:x + 160] = (250, 250, 250)
     assert len(find_card_clusters(f)) == 1
 
 
 def test_corner_indices_on_a_synthetic_cascade():
     f = _frame()
     for x, y in [(800, 350), (812, 392)]:
-        f[y:y + 150, x:x + 100] = (250, 250, 250)
+        f[y:y + 230, x:x + 160] = (250, 250, 250)
         cv2.putText(f, "7", (x + 6, y + 36), cv2.FONT_HERSHEY_SIMPLEX,
                     0.9, (20, 20, 20), 2)
     clusters = find_card_clusters(f)

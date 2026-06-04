@@ -46,13 +46,22 @@ def _card_mask(img):
     return cv2.bitwise_and(white, area)
 
 
-def find_card_clusters(img, erode=21, min_core_area=900):
+def find_card_clusters(img, erode=21, min_core_area=900, min_width=140):
     """Return card-fill clusters as ``[(x, y, w, h), ...]`` left-to-right.
 
     Erodes the card mask by an ``erode``-px square so only solid card cores
     survive (printed felt text dissolves), then takes each surviving component's
     bounding box, grown back by the erosion radius to approximate the card's true
-    extent. A cluster is one hand (cascaded cards merge into one core)."""
+    extent. A cluster is one hand (cascaded cards merge into one core).
+
+    ``min_width`` drops clusters narrower than a single card. Bold permanent felt
+    print — the "BLACK JACK", "PAY 3 TO 2" and "INSURANCE PAYS" titles — has
+    strokes thick enough to survive erosion, fragmenting into tall, narrow false
+    clusters (measured ~60-150px wide) that otherwise spawn phantom rank reads.
+    Genuine card clusters at 1920x1080 are >=~160px wide (one real read seen as
+    narrow as a 112px *false* "J" straddling the title gap — see frame_00737), so
+    a 140px floor clears the text noise with margin below the narrowest real card.
+    Tuned for 1920x1080, like ``erode``/``min_core_area``."""
     if not _HAVE_DEPS:
         raise RuntimeError("vision needs: pip install numpy opencv-python")
     H, W = img.shape[:2]
@@ -67,6 +76,8 @@ def find_card_clusters(img, erode=21, min_core_area=900):
             continue
         x0, y0 = max(0, x - pad), max(0, y - pad)
         x1, y1 = min(W, x + w + pad), min(H, y + h + pad)
+        if x1 - x0 < min_width:
+            continue
         out.append((int(x0), int(y0), int(x1 - x0), int(y1 - y0)))
     out.sort(key=lambda b: b[0])
     return out
