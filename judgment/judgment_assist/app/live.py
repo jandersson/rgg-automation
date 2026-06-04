@@ -13,13 +13,14 @@ Advice-only by design — it never sends inputs to the game.
 
 Current scope:
   blackjack — reads the two HUD "Total" badges (dealer up + player total) and
-              gives hit/stand advice. Totals alone can't tell soft hands, pairs,
-              or whether a double is still legal, so the overlay flags those for
-              a manual check. Needs the ``hud`` ROIs (calibrate mark --game hud)
-              and the digit templates in ``data/digits``. Also keeps a Hi-Lo
-              count by reading the felt cards each frame (``ShoeCounter``, needs
-              the rank templates in ``data/templates``); the running/true count
-              feeds count-aware strategy and bet sizing. ``--no-count`` disables.
+              gives hit/stand advice. To upgrade that to double/split/soft it
+              also reads the player's own felt cards (needs the rank templates in
+              ``data/templates``); if they're missing it falls back to totals.
+              Needs the ``hud`` ROIs (calibrate mark --game hud) and the digit
+              templates in ``data/digits``. Hi-Lo counting is EXPERIMENTAL and
+              OFF by default (``--count``): this is a multi-seat table, so the
+              reader can't see most of the shoe and the count isn't usable for
+              betting (issue #3). The HUD-total advice is the reliable product.
   poker     — reads hole + board cards via template matching -> equity & made
               hand vs ``--opp`` opponents. Needs card templates + ``poker`` ROIs.
 """
@@ -161,20 +162,26 @@ def run(a):
     if a.game == "blackjack":
         from ..vision.hud import HudReader
         reader = HudReader(a.digits, min_confidence=a.min_confidence)
-        # Optional card reading: ranks off the felt drive the Hi-Lo count AND
-        # upgrade the advice to double/split/soft. Advice still works without it
-        # (totals from the HUD), so missing templates just disable it.
-        if not a.no_count:
+        # Read the player's own cards off the felt to upgrade the advice to
+        # double/split/soft. Advice still works without it (HUD totals only), so
+        # missing templates just disable the upgrade. This is INDEPENDENT of
+        # counting — the reader earns its keep on advice regardless.
+        try:
             from ..vision.recognizer import CardRecognizer
             from ..vision.reader import read_clusters as _read_clusters
+            rank_rec = CardRecognizer(a.templates, mode="rank",
+                                      min_confidence=a.min_confidence)
+            read_clusters = _read_clusters
+        except RuntimeError as e:
+            print(f"  (card reading off — {e})")
+        # Hi-Lo counting is EXPERIMENTAL and OFF by default. This is a multi-seat
+        # table: the other players' and dealer's cards sit at the edges, outside
+        # the reader, so the count only ever sees a fraction of the shoe and is
+        # NOT usable for betting (issue #3 — and only matters at all if the game
+        # runs a persistent shoe, which is unconfirmed). --count enables it for dev.
+        if a.count and rank_rec is not None:
             from ..blackjack.counting import ShoeCounter
-            try:
-                rank_rec = CardRecognizer(a.templates, mode="rank",
-                                          min_confidence=a.min_confidence)
-                shoe = ShoeCounter(decks=a.decks)
-                read_clusters = _read_clusters
-            except RuntimeError as e:
-                print(f"  (card reading off — {e})")
+            shoe = ShoeCounter(decks=a.decks)
             # Result-banner reader gives a definitive hand boundary + outcome.
             try:
                 from ..vision.result import ResultReader
@@ -272,8 +279,9 @@ def main(argv=None):
     p.add_argument("--decks", type=int, default=6, help="shoe size for true-count scaling")
     p.add_argument("--results", default="data/results",
                    help="result-banner templates (Win/Lose/Push/Blackjack/Bust)")
-    p.add_argument("--no-count", action="store_true",
-                   help="disable Hi-Lo card counting (advice only)")
+    p.add_argument("--count", action="store_true",
+                   help="EXPERIMENTAL: enable Hi-Lo card counting (off by default — "
+                        "multi-seat table, the count can't see most of the shoe; issue #3)")
     p.add_argument("--log", default=None,
                    help="append a CSV row per finished hand (outcome + running/true count)")
     p.add_argument("--save-misses", dest="save_misses", default=None,
