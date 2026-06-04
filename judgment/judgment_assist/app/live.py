@@ -230,12 +230,13 @@ def run(a):
         # The result-banner reader gives definitive hand boundaries + outcomes,
         # needed by BOTH counting and DB session logging.
         db_on = bool(a.db) and not a.no_db
-        if a.count or db_on:
-            try:
-                from ..vision.result import ResultReader
-                result_reader = ResultReader(a.results)
-            except RuntimeError as e:
-                print(f"  (result-cue detection off — {e})")
+        # The result-banner reader powers the last-result overlay line, the DB hand
+        # boundaries, and counting — always build it for blackjack.
+        try:
+            from ..vision.result import ResultReader
+            result_reader = ResultReader(a.results)
+        except RuntimeError as e:
+            print(f"  (result-cue detection off — {e})")
         if a.count and rank_rec is not None:
             from ..blackjack.counting import ShoeCounter
             shoe = ShoeCounter(decks=a.decks)
@@ -256,6 +257,7 @@ def run(a):
     monitor = cfg.get("monitor", 1)
     tracker = HandTracker()   # one event per hand (dedup) + the dealer up-card
     hand_no = 0               # per-session finished-hand counter (for the DB)
+    last_result = None        # last finished-hand outcome, shown in the overlay
     log_path = a.log if a.game == "blackjack" else None
     misses_dir = a.save_misses if a.game == "blackjack" else None
     miss_streak, miss_saved = 0, False
@@ -287,6 +289,7 @@ def run(a):
                     event = tracker.update(pt, dealer_up, cue)
                     if event is not None:
                         outcome, dealer_upcard = event
+                        last_result = outcome
                         hand_no += 1
                         if shoe is not None and shoe.end_hand(outcome) and log_path:
                             log_hand(log_path, shoe)
@@ -311,6 +314,8 @@ def run(a):
                             miss_streak, miss_saved = 0, False
                     text = blackjack_text(reader, frame, roi_cfg,
                                           shoe.true_count if shoe else None, card_reads)
+                    if last_result is not None:
+                        text += f"\nLAST: {last_result}"
                     if shoe is not None:
                         text += "\n" + count_line(shoe)
                 else:
