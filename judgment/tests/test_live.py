@@ -1,5 +1,5 @@
 """Tests for the live advisor's player-hand identification + full-strategy upgrade."""
-from judgment_assist.app.live import match_player_hand, log_hand
+from judgment_assist.app.live import match_player_hand, log_hand, HandTracker
 from judgment_assist.blackjack.counting import ShoeCounter
 from judgment_assist.blackjack.strategy import recommend, DOUBLE, SPLIT
 
@@ -40,6 +40,28 @@ def test_matched_hand_drives_double_and_split_advice():
     assert recommend(hand, 10).action == DOUBLE
     pair8 = match_player_hand([[8, 8], [7]], 16)          # pair of 8s
     assert recommend(pair8, 7).action == SPLIT
+
+
+def test_hand_tracker_dedupes_bust_and_keeps_upcard():
+    # the real DB bug: a busted hand logged BUST/BUST/LOSE (3x) for one hand, and
+    # dealer_up was the dealer's FINAL total (22), not the up-card (6).
+    t = HandTracker()
+    seq = [(14, 6, None),       # in-play, dealer up-card 6
+           (20, 6, None),       # player hit, still in-play
+           (24, 22, "BUST"),    # busted: HUD>21, dealer revealed to 22, BUST banner
+           (24, 22, "BUST"),    # lingering result frame
+           (24, 22, "LOSE")]    # banner switches to LOSE — same hand
+    events = [e for e in (t.update(p, d, c) for p, d, c in seq) if e is not None]
+    assert events == [("BUST", 6)]        # exactly one event; up-card 6, not 22
+
+
+def test_hand_tracker_rearms_each_new_hand():
+    t = HandTracker()
+    assert t.update(18, 10, None) is None
+    assert t.update(18, 10, "LOSE") == ("LOSE", 10)   # hand 1 result
+    assert t.update(18, 10, "LOSE") is None            # lingering -> no dupe
+    assert t.update(15, 7, None) is None               # new hand in-play -> re-arm
+    assert t.update(15, 7, "WIN") == ("WIN", 7)        # hand 2 result
 
 
 def test_log_hand_writes_a_csv_row(tmp_path):

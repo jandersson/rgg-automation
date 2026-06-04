@@ -136,6 +136,41 @@ def log_hand(path, shoe):
                 f"{shoe.last_outcome},{shoe.running},{shoe.true_count:.2f},{shoe.seen}\n")
 
 
+class HandTracker:
+    """Turns the per-frame stream of (player_total, dealer_total, result_cue) into
+    exactly ONE event per finished hand.
+
+    Two things it gets right that naive per-frame logging didn't:
+    * **Dedup.** A busted hand shows HUD>21 for several frames AND then a result
+      banner — both used to log. A latch logs the first result frame only and
+      re-arms once the table is back to an active hand (a readable in-play total
+      with no result showing).
+    * **Dealer up-card.** At the result the dealer badge shows the dealer's FINAL
+      total (e.g. 22), not the up-card. We remember the dealer total seen DURING
+      play (when only the up-card is exposed, value 2-11) and report that."""
+
+    def __init__(self):
+        self.latched = False
+        self.dealer_upcard = None
+
+    def update(self, player_total, dealer_total, cue):
+        """Return ``(outcome, dealer_upcard)`` once, on the first frame of a hand's
+        result; otherwise ``None``."""
+        busted = player_total is not None and player_total > 21
+        result_now = bool(cue) or busted
+        if not result_now and player_total is not None and 2 <= player_total <= 21:
+            self.latched = False                      # active hand -> re-arm
+            if dealer_total is not None and 2 <= dealer_total <= 11:
+                self.dealer_upcard = dealer_total     # only the up-card is shown now
+            return None
+        if result_now and not self.latched:
+            self.latched = True
+            up = self.dealer_upcard
+            self.dealer_upcard = None
+            return (cue or "BUST", up)
+        return None
+
+
 def save_miss(dirpath, frame, hud_total, card_reads):
     """Dump a frame where the read disagrees with the HUD total — a reader miss.
     The filename records both totals so the failures are easy to triage later."""
@@ -218,9 +253,8 @@ def run(a):
         overlay = SuggestionOverlay(x=a.x, y=a.y)
 
     monitor = cfg.get("monitor", 1)
-    prev_cue = None      # last frame's result banner, for rising-edge hand-end detection
-    prev_busted = False  # last frame's bust state
-    hand_no = 0          # per-session finished-hand counter (for the DB)
+    tracker = HandTracker()   # one event per hand (dedup) + the dealer up-card
+    hand_no = 0               # per-session finished-hand counter (for the DB)
     log_path = a.log if a.game == "blackjack" else None
     misses_dir = a.save_misses if a.game == "blackjack" else None
     miss_streak, miss_saved = 0, False
@@ -246,26 +280,19 @@ def run(a):
                     if result_reader is not None or shoe is not None or misses_dir:
                         pt, _ = reader.read_roi(frame, roi_cfg["player_total"])
                         dealer_up, _ = reader.read_roi(frame, roi_cfg["dealer_total"])
-                    busted = pt is not None and pt > 21
-                    # One hand boundary per frame: the result banner just appeared, or
-                    # (fallback, if the banner read was missed) the HUD total crossed 21.
-                    outcome = None
-                    if result_reader is not None:
-                        cue = result_reader.read(frame)
-                        if cue and cue != prev_cue:
-                            outcome = cue
-                        prev_cue = cue
-                    if outcome is None and busted and not prev_busted:
-                        outcome = "BUST"
-                    prev_busted = busted
-                    if outcome is not None:
+                    # One event per finished hand (dedupes the bust cue + banner),
+                    # carrying the dealer up-card seen during play.
+                    cue = result_reader.read(frame) if result_reader is not None else None
+                    event = tracker.update(pt, dealer_up, cue)
+                    if event is not None:
+                        outcome, dealer_upcard = event
                         hand_no += 1
                         if shoe is not None and shoe.end_hand(outcome) and log_path:
                             log_hand(log_path, shoe)
                         if store is not None:
                             store.record_hand(
                                 session_id, hand_no, outcome=outcome,
-                                player_total=pt, dealer_up=dealer_up,
+                                player_total=pt, dealer_up=dealer_upcard,
                                 running=shoe.running if shoe else None,
                                 true_count=shoe.true_count if shoe else None,
                                 cards_seen=shoe.seen if shoe else None)
