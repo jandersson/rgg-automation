@@ -17,6 +17,13 @@ flop/turn/river with a betting round each; best 5-of-7 wins. There are several
 opponents at the table. So the right question is *"what's my equity vs N
 opponents given the board?"* plus pot odds — not a draw-discard calc.
 
+> **Poker status:** the equity/pot-odds *brain* works (manual CLI below), and the
+> chip/pot OCR + street/suit reading are reliable, but **fully-automatic card
+> reading is not achievable on this game** (cards overlap, banners cover them, and
+> there's no HUD total to cross-check; ~80% rank ceiling vs the ~97%/card a 7-card
+> hand needs). The realistic tool is **semi-automatic**: type your cards, it reads
+> the pot/odds. Full write-up in [POKER.md](POKER.md).
+
 **Blackjack** — standard 21 with these house rules:
 - Dealer **stands on 17 (S17)**; **late surrender** offered; blackjack pays **3:2**.
 - **Six-Card Charlie**: hold 6 cards without busting → automatic win. A real
@@ -116,7 +123,10 @@ judgment_assist/
     strategy.py       multi-deck basic strategy (+ count deviations)
     counting.py       Hi-Lo counter (experimental — see the multi-seat note above)
     engine.py         advisor tying strategy + counting + Six-Card Charlie
-  vision/             localize + recognise cards (multi-scale template match)
+  vision/
+    locate/recognizer  card localize + multi-scale rank match (blackjack)
+    hud.py             HUD digit reader (badge Otsu + poker white-on-plate mode)
+    poker.py           label-free poker state (street / board count)
   capture/            screen-region grab (mss) + calibration + crop harvesting
   labeling.py         reusable image-labeling core (LabelSession)
   sessions.py         SQLite session/hand telemetry + summary
@@ -125,3 +135,6 @@ judgment_assist/
 tests/                pytest suite (brains + vision + tooling)
 config/               regions.example.json -> copy to regions.json after calibration
 ```
+
+See [POKER.md](POKER.md) for the poker status/findings and [ARCHITECTURE.md](ARCHITECTURE.md)
+for the build plan.

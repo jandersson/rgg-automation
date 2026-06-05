@@ -1,0 +1,83 @@
+# Poker (Texas Hold'em) — status & findings
+
+Honest record of the poker track as of 2026-06-05. **Bottom line: the poker *brain*
+works and several *eyes* are reliable, but fully-automatic card reading is not
+achievable on this game — the realistic tool is semi-automatic (you type the cards,
+it reads the pot/odds).**
+
+## The brain — works today
+
+`poker/evaluator.py` (7-card eval), `equity.py` (Monte-Carlo equity vs N opponents),
+`advisor.py` (equity + pot odds → fold/call/raise). Pure Python, tested, usable now
+via the manual CLI:
+
+```
+uv run python -m judgment_assist.app.cli poker --hole "Ah Kh" --board "Qh 7h 2h" --opp 2
+```
+
+## The eyes
+
+| Piece | Status | Notes |
+|---|---|---|
+| **Chip / pot OCR** | ✅ reliable | `HudReader.read(white=True)` — see below. Pot 0/20/80 read at 0.82–0.94. |
+| **Street detection** | ✅ reliable | `vision/poker.py` `street()` — counts board cards (preflop/flop/turn/river). Label-free. |
+| **Suit recognition** | ~90% | colour red/black = 100% (ink-pixel redness); within-colour shape ~good. |
+| **Card RANK recognition** | ❌ ~80% wall | not reliable enough — see below. |
+
+### Chip/pot OCR (#4) — the reliable win
+
+Poker numbers are **white digits on a coloured plate** among gold labels/border, where
+Otsu thresholding fails. `HudReader.read(white=True)` isolates white (bright +
+low-saturation, V≥135) and **strips the plate's full-width top-edge highlight** (a
+near-full-width white row that otherwise merges digit tops and bleeds into glyph
+crops — this was the reliability fix), then reuses the existing digit
+split + match. Poker digit templates live in `data/poker_digits/` (gitignored).
+Number ROIs are in `config/regions.json` → `poker` (pot/chips/bet/total_bet).
+
+### Card reading — why it doesn't work (exhaustively established)
+
+Card slots are fixed (2 hole + 5 board, ROIs in config `poker`); poker cards are flat
+and separated (NOT blackjack's tilted cascade). We captured 263 frames, labeled 97
+cards (all ranks), and tried: template matching (rank 75%), raw-pixel SVM (62%),
+HOG+SVM (corner 71% / **whole-card 80%**), a CNN with augmentation (corner 53% /
+whole-card 75%), and **temporal voting** (57%→57%, no gain — errors are *systematic*,
+not random). Findings:
+
+- **The labels are correct** (verified by montaging every misclassification) — it is
+  NOT a labeling problem.
+- **Whole-card crops beat corner crops** (80% vs 75%) — the corner was too small and
+  contaminated. But that only buys +5%.
+- The residual errors are **contamination** (result banners painted over cards,
+  overlapping neighbour cards) + **too few / thin samples** (a single `5`) + genuine
+  glyph ambiguity at ~30px. Adding compute (sklearn, a CPU CNN) did NOT help — the
+  ceiling is in the data/capture, not the model.
+- **The math kills it:** poker needs ~97%/card (7 cards/hand, and unlike blackjack
+  there is NO HUD total to cross-check against). Even an optimistic 90% gives
+  0.9⁷ ≈ 48% fully-correct hands. 80% is nowhere near, and there's no cheap path up.
+
+**Conclusion:** screen-scraped poker card reading on this game is not reliable enough
+for trustworthy hand advice, and very likely never will be.
+
+## The realistic tool — semi-automatic
+
+Accept that the cards can't be auto-read; lean on what works:
+- You type your 2 hole cards + the board (the manual CLI).
+- The tool auto-reads the **pot, street, and opponent count** and shows equity + pot
+  odds.
+
+That's a genuinely useful poker assistant that sidesteps the one thing the screen
+won't give us. (Wiring not yet built — `to_call` = max active-opponent Bet − player
+Bet still TODO, plus the overlay glue.)
+
+## Dependencies note
+
+`scikit-learn` and `torch` (CPU) were added to **prove** the card-reading wall is a
+data/capture limit, not a tooling gap. They are not used by any shipping code. If the
+semi-auto path is taken and nobody pursues a large poker-card dataset, they can be
+removed to keep the project lean.
+
+## Open issues / next
+
+- **#4** Poker equity overlay + chip OCR — chip OCR done; overlay = the semi-auto glue.
+- **#5** tilted/overlapping fan recognition — N/A for poker (flat cards); the poker
+  card wall is contamination + sample size, a different problem.
