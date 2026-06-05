@@ -145,31 +145,34 @@ class HandTracker:
     """Turns the per-frame stream of (player_total, dealer_total, result_cue) into
     exactly ONE event per finished hand.
 
-    Two things it gets right that naive per-frame logging didn't:
+    Three things it gets right that naive per-frame logging didn't:
+    * **Only log hands we watched from the start.** ``in_hand`` flips True when we
+      see the play phase (a readable in-play total, no result), and a hand is only
+      logged if it's set. So a mid-round restart that lands on the result phase is
+      skipped — we don't record a hand whose play (and dealer up-card) we never saw.
     * **Dedup.** A busted hand shows HUD>21 for several frames AND then a result
-      banner — both used to log. A latch logs the first result frame only and
-      re-arms once the table is back to an active hand (a readable in-play total
-      with no result showing).
+      banner. ``in_hand`` clears on the first result frame, so the rest don't re-log
+      until the next hand's play re-arms it.
     * **Dealer up-card.** At the result the dealer badge shows the dealer's FINAL
       total (e.g. 22), not the up-card. We remember the dealer total seen DURING
       play (when only the up-card is exposed, value 2-11) and report that."""
 
     def __init__(self):
-        self.latched = False
+        self.in_hand = False        # have we observed this hand's play phase?
         self.dealer_upcard = None
 
     def update(self, player_total, dealer_total, cue):
-        """Return ``(outcome, dealer_upcard)`` once, on the first frame of a hand's
-        result; otherwise ``None``."""
+        """Return ``(outcome, dealer_upcard)`` once, on the first result frame of a
+        hand we watched from play; otherwise ``None``."""
         busted = player_total is not None and player_total > 21
         result_now = bool(cue) or busted
         if not result_now and player_total is not None and 2 <= player_total <= 21:
-            self.latched = False                      # active hand -> re-arm
+            self.in_hand = True                       # watching an active hand
             if dealer_total is not None and 2 <= dealer_total <= 11:
                 self.dealer_upcard = dealer_total     # only the up-card is shown now
             return None
-        if result_now and not self.latched:
-            self.latched = True
+        if result_now and self.in_hand:               # gate: must have seen the play
+            self.in_hand = False
             up = self.dealer_upcard
             self.dealer_upcard = None
             return (cue or "BUST", up)

@@ -80,6 +80,17 @@ def test_hand_tracker_rearms_each_new_hand():
     assert t.update(15, 7, "WIN") == ("WIN", 7)        # hand 2 result
 
 
+def test_hand_tracker_skips_hand_not_watched_from_play():
+    # overlay restarted mid-round, landing on the result phase -> never saw the
+    # play (or the dealer up-card), so the hand must NOT be logged.
+    t = HandTracker()
+    assert t.update(20, 20, "PUSH") is None
+    assert t.update(20, 20, "PUSH") is None
+    # the next hand, observed from its play phase, logs normally
+    assert t.update(17, 8, None) is None
+    assert t.update(17, 8, "WIN") == ("WIN", 8)
+
+
 def test_log_hand_writes_a_csv_row(tmp_path):
     sc = ShoeCounter(confirm=1)
     sc.observe([5, 6])          # +2, two cards
