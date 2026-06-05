@@ -67,6 +67,10 @@ Both also run as interactive REPLs (omit `--hand` / `--hole`).
 Source is **PC Steam, borderless/windowed**; advice/overlay only (no inputs are
 sent to the game). With Judgment open on the blackjack/poker table:
 
+> **GUI launcher** — to pick the game and set the flags from a form instead of
+> the command line, run `uv run python -m judgment_assist.app.launcher`. It
+> launches the advisor (below) in its own console window with your chosen flags.
+
 ```powershell
 uv run python -m judgment_assist.capture.calibrate windows                          # find the title
 # blackjack needs only the 13 rank glyphs (suit-agnostic):
@@ -146,8 +150,8 @@ judgment_assist/
   capture/            screen-region grab (mss) + calibration + crop harvesting
   labeling.py         reusable image-labeling core (LabelSession)
   sessions.py         SQLite session/hand telemetry + summary
-  app/                cli.py (manual), live.py (overlay), label.py (labeler GUI),
-                      sessions.py (report), verify_gui.py
+  app/                cli.py (manual), live.py (overlay), launcher.py (flag GUI),
+                      label.py (labeler GUI), sessions.py (report), verify_gui.py
 tests/                pytest suite (brains + vision + tooling)
 config/               regions.example.json -> copy to regions.json after calibration
 ```
