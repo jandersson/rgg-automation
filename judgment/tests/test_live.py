@@ -145,22 +145,26 @@ class _FakeReader:
 
 
 def _poker_cfg():
-    # board ROIs land on dealt felt; banners are blank (all active). String keys
-    # for the number ROIs let _FakeReader resolve them. hole anchors point at the
-    # painted board cards so card_present sees a face-up card during detection.
+    # hole and board rows are SEPARATE (as in the real game) so painting the hole
+    # for detection doesn't inflate the screen board count. String keys for the
+    # number ROIs let _FakeReader resolve them; banners blank => all active.
     return {"corner": [70, 105],
-            "hole": [[296, 298], [562, 298]],
+            "hole": [[652, 650], [984, 650]],
             "board": [[296, 298], [562, 298], [838, 298], [1128, 298], [1410, 298]],
             "pot": "pot", "bet": "my",
             "opp_bet": ["o0", "o1", "o2"],
             "opp_banner": [[0, 0, 95, 42], [100, 0, 95, 42], [200, 0, 95, 42]]}
 
 
-def _felt_with_board(n):
+def _frame(n_board=0, hole=True):
+    """A felt frame with both hole cards face-up (for detection/presence) and the
+    first ``n_board`` community cards dealt (sets the screen street)."""
     np = pytest.importorskip("numpy")
     pytest.importorskip("cv2")
     f = np.full((1080, 1920, 3), (70, 120, 40), np.uint8)
-    for x, y in _poker_cfg()["board"][:n]:
+    cfg = _poker_cfg()
+    slots = (cfg["hole"] if hole else []) + cfg["board"][:n_board]
+    for x, y in slots:
         f[y:y + 200, x - 4:x + 180] = (245, 245, 245)
     return f
 
@@ -168,7 +172,7 @@ def _felt_with_board(n):
 def test_poker_advisor_prompts_without_hole_cards():
     reader = _FakeReader({"pot": 40, "my": 0, "o0": 20, "o1": 20, "o2": 0})
     pa = PokerAdvisor(reader, _poker_cfg(), iters=2000)     # no card_reader -> manual
-    txt = pa.text(_felt_with_board(0))
+    txt = pa.text(_frame(0, hole=False))
     assert "type your hole cards" in txt
     assert "to-call 20" in txt and "vs 3 active" in txt    # auto-read still shown
 
@@ -179,9 +183,30 @@ def test_poker_advisor_full_advice_uses_autoread_state():
     pa = PokerAdvisor(reader, _poker_cfg(), iters=4000)
     pa.set_hole(parse_cards("Ac As"))
     pa.set_board(parse_cards("Ah Kd 9s"))
-    txt = pa.text(_felt_with_board(3))
+    txt = pa.text(_frame(3))
     assert "vs 3 active" in txt and "to-call 5" in txt
     assert "three of a kind" in txt and ">>> RAISE" in txt
+
+
+def test_poker_advisor_street_follows_screen_and_prompts_for_board():
+    # screen shows 3 community cards but you've only typed your hole -> show FLOP
+    # and ask for the board, not stale preflop odds.
+    reader = _FakeReader({"pot": 80, "my": 0, "o0": 0, "o1": 0, "o2": 0})
+    pa = PokerAdvisor(reader, _poker_cfg(), iters=2000)
+    pa.set_hole(parse_cards("Ah Kh"))
+    txt = pa.text(_frame(3))                  # 3 board cards visible, none typed
+    assert "FLOP" in txt and "type the board" in txt
+    pa.set_board(parse_cards("Qh 7c 2d"))     # now type them -> real advice, flop
+    txt2 = pa.text(_frame(3))
+    assert "(flop)" in txt2 and ">>>" in txt2 and "type the board" not in txt2
+
+
+def test_screen_dimmed_detects_pause():
+    np = pytest.importorskip("numpy")
+    live = np.full((100, 100, 3), 90, np.uint8)
+    paused = np.full((100, 100, 3), 20, np.uint8)
+    from judgment_assist.app.live import _screen_dimmed
+    assert _screen_dimmed(paused) is True and _screen_dimmed(live) is False
 
 
 def test_poker_advisor_flags_duplicate_cards():
@@ -189,7 +214,7 @@ def test_poker_advisor_flags_duplicate_cards():
     pa = PokerAdvisor(reader, _poker_cfg(), iters=2000)
     pa.set_hole(parse_cards("Ah Kd"))
     pa.set_board(parse_cards("Ah 2c 3d"))
-    assert "duplicate card" in pa.text(_felt_with_board(3))
+    assert "duplicate card" in pa.text(_frame(3))
 
 
 def test_poker_advisor_caches_equity_across_frames():
@@ -197,7 +222,7 @@ def test_poker_advisor_caches_equity_across_frames():
     pa = PokerAdvisor(reader, _poker_cfg(), iters=4000)
     pa.set_hole(parse_cards("Ac As"))
     pa.set_board(parse_cards("Ah Kd 9s"))
-    f = _felt_with_board(3)
+    f = _frame(3)
     pa.text(f)
     first = pa._eq
     pa.text(f)
@@ -238,7 +263,7 @@ def test_poker_advisor_autodetects_hole_then_locks_on_override():
            (parse_cards("Kd")[0], {"color": "red"}))
     pa = PokerAdvisor(reader, _poker_cfg(), iters=2000,
                       card_reader=_FakeCardReader(det))
-    f = _felt_with_board(2)                  # both hole slots show a face-up card
+    f = _frame(0)                  # both hole slots show a face-up card
     pa.text(f)                               # 1st frame: candidate, not yet stable
     assert pa.hole == []
     txt = pa.text(f)                         # 2nd identical frame: accept the guess
@@ -253,7 +278,7 @@ def test_poker_advisor_captures_correction_as_training():
     w = _RecWriter()
     pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
                       _poker_cfg(), iters=2000, training=w)
-    pa.text(_felt_with_board(2))             # both hole slots face-up, frame cached
+    pa.text(_frame(0))             # both hole slots face-up, frame cached
     pa.set_hole(parse_cards("Ah Kd"))        # correction -> saved with your labels
     assert w.saved == [("Ah", "H0"), ("Kd", "H1")]
 
@@ -264,7 +289,7 @@ def test_poker_advisor_confirm_saves_detected_hand():
     cr, w = _FakeCardReader(det), _RecWriter()
     pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
                       _poker_cfg(), iters=2000, card_reader=cr, training=w)
-    f = _felt_with_board(2)
+    f = _frame(0)
     pa.text(f); pa.text(f)                    # detect -> hole set (unlocked)
     pa.confirm()                              # bare Enter -> lock + save detected
     assert w.saved == [("Ac", "H0"), ("Kd", "H1")] and pa.hole_locked
@@ -275,7 +300,7 @@ def test_poker_advisor_captures_typed_board():
     w = _RecWriter()
     pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
                       _poker_cfg(), iters=2000, training=w)
-    pa.text(_felt_with_board(3))
+    pa.text(_frame(3))
     pa.set_board(parse_cards("Qh 7h 2h"))    # typed board cards are labels too
     assert [slot for _, slot in w.saved] == ["B0", "B1", "B2"]
 
@@ -283,7 +308,7 @@ def test_poker_advisor_captures_typed_board():
 def test_poker_advisor_no_capture_when_learning_off():
     pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
                       _poker_cfg(), iters=2000, training=None)   # learn off
-    pa.text(_felt_with_board(2))
+    pa.text(_frame(0))
     pa.set_hole(parse_cards("Ah Kd"))        # no writer -> no crash, just sets state
     assert cards_str(pa.hole) == "Ah Kd"
 
@@ -298,10 +323,10 @@ def test_correction_survives_pause_resume_same_hand():
     cr = _FakeCardReader(_det("4s", "9h"))
     pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
                       _poker_cfg(), iters=2000, card_reader=cr)
-    f = _felt_with_board(2)
+    f = _frame(0)
     pa.text(f); pa.text(f)                    # detect 4s 9h, baseline = 4s 9h
     pa.set_hole(parse_cards("8c 2d"))         # hero corrects -> locked
-    pa.text(_felt_with_board(0))              # pause: hole reads as absent
+    pa.text(_frame(0, hole=False))              # pause: hole reads as absent
     pa.text(f); pa.text(f); pa.text(f)        # resume: same 4s 9h on screen
     assert pa.hole_locked and cards_str(pa.hole) == "8c 2d"   # correction kept
 
@@ -310,7 +335,7 @@ def test_poker_advisor_redetects_after_new_deal():
     cr = _FakeCardReader(_det("7c", "2d"))
     pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
                       _poker_cfg(), iters=2000, card_reader=cr)
-    f = _felt_with_board(2)
+    f = _frame(0)
     pa.text(f); pa.text(f)                    # detect 7c 2d, baseline = 7c 2d
     pa.set_hole(parse_cards("Ah Kh"))         # correction -> locked
     pa.text(f)

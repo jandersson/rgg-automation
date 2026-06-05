@@ -428,10 +428,15 @@ class PokerAdvisor:
 
         st = P.table_state(frame, self.cfg, self.reader)
         pot, to_call = st["pot"] or 0, st["to_call"]
-        # The street comes from the board the hero TYPED (authoritative), not the
-        # screen's board count — in semi-auto mode they can disagree mid-deal.
-        stage = {0: "preflop", 3: "flop", 4: "turn", 5: "river"}.get(
-            len(board), f"{len(board)} cards")
+        # The street follows the SCREEN's community-card count (reliable), so it
+        # advances flop->turn->river as the game does. When you haven't typed the
+        # board yet it's "behind" — we show the real street and nudge you to enter
+        # the cards (equity needs their identities, which can't be read).
+        streets = {0: "preflop", 3: "flop", 4: "turn", 5: "river"}
+        screen_nb, typed_nb = st["board"], len(board)
+        behind = typed_nb < screen_nb
+        nb = screen_nb if behind else typed_nb
+        stage = streets.get(nb, f"{nb} cards")
         # auto opponent count from the fold banners; fall back to --opp if the
         # banners aren't calibrated (opp_active empty).
         n_auto = st["n_active"] if st["opp_active"] else None
@@ -447,12 +452,19 @@ class PokerAdvisor:
             return f"poker: duplicate card in {cards_str(hole)} / {cards_str(board)}\n" + live
         if opp < 1:
             return f"YOU {cards_str(hole)} - all opponents folded, pot is yours\n" + live
-        # A detected (not yet confirmed) hand is a guess — flag it and show the
+        # A detected (not yet confirmed) hole is a guess — flag it and show the
         # reliable colour so the hero can correct rank/suit at a glance.
         tag = ""
         if not locked:
             cols = "/".join(i["color"] for i in info) if info else ""
             tag = f"  (detected {cols} - type to fix)"
+        if behind:
+            # the board moved on but we don't know the new cards — ask for them
+            # rather than show stale, wrong-street odds.
+            return (f"YOU {cards_str(hole)}{tag}\n"
+                    f"BRD {cards_str(board) or '-'}  <- {stage.upper()} on screen: type the board\n"
+                    f"{live}\n"
+                    f">>> type the {screen_nb} board cards for {stage} odds   e.g. | Qh 7c 2d")
         out = poker_decide(self._equity(hole, board, opp), to_call=to_call, pot=pot)
         made = f"  [{out['made_hand']}]" if "made_hand" in out else ""
         odds = f"  pot-odds {out['pot_odds']*100:.0f}%" if to_call > 0 else ""
@@ -460,6 +472,12 @@ class PokerAdvisor:
                 f"BRD {cards_str(board) or '-'} ({stage})\n"
                 f"{live}\n"
                 f">>> {out['recommendation'].upper()}  eq {out['equity']*100:.0f}%{odds}")
+
+
+def _screen_dimmed(frame, thresh=50):
+    """Whole screen dark -> Judgment is paused / not focused (it dims everything;
+    a live table sits ~90 mean brightness, a paused one ~20)."""
+    return float(frame.mean()) < thresh
 
 
 def run(a):
@@ -544,6 +562,7 @@ def run(a):
     log_path = a.log if a.game == "blackjack" else None
     misses_dir = a.save_misses if a.game == "blackjack" else None
     miss_streak, miss_saved = 0, False
+    last_text = None          # last real advice, held while the game is paused
     if log_path:
         print(f"  logging each hand to {log_path}")
     if misses_dir:
@@ -552,13 +571,19 @@ def run(a):
     def step(frame):
         """One frame -> the overlay text (plus blackjack's per-frame side effects:
         hand tracking, DB rows, counting, miss-saving)."""
-        nonlocal hand_no, last_result, miss_streak, miss_saved
+        nonlocal hand_no, last_result, miss_streak, miss_saved, last_text
         # The game window collapses to 0x0 when minimized/not foreground; mss then
         # returns an empty frame. Don't read it — wait.
         if frame is None or frame.size == 0 or min(frame.shape[:2]) < 10:
             return f"{a.game}: game window not visible (focus Judgment)..."
+        # Judgment dims the whole screen when paused / not focused (including while
+        # you click the overlay to type). Show PAUSED and hold the last advice
+        # rather than reading garbage off the dimmed frame.
+        if _screen_dimmed(frame):
+            return "== PAUSED ==  (resume the game)" + (f"\n\n{last_text}" if last_text else "")
         if a.game != "blackjack":
-            return poker.text(frame)
+            last_text = poker.text(frame)
+            return last_text
         card_reads = read_clusters(frame, rank_rec) if rank_rec is not None else None
         pt = dealer_up = None
         if result_reader is not None or shoe is not None or misses_dir:
@@ -595,6 +620,7 @@ def run(a):
             text += f"\nLAST: {last_result}"
         if shoe is not None:
             text += "\n" + count_line(shoe)
+        last_text = text
         return text
 
     overlay = None
