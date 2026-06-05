@@ -121,19 +121,31 @@ class HoleCardReader:
         with self._lock:
             self._rank_clf, self._suit_clf = rank_m, suit_m
 
-    def recognize(self, card_bgr):
-        """Recognise a (native) whole hole-card crop. Returns ``(card, info)``
-        with ``card = (rank, suit)`` and ``info['color']`` ('red'/'black'). The
-        suit is colour-gated — the SVM only picks among suits of the detected
-        colour — so the read never contradicts the reliable colour signal."""
+    def recognize(self, card_bgr, kind="H"):
+        """Recognise a (native) whole-card crop — ``kind`` 'H' (hole) or 'B'
+        (board), which have different crop geometry. Returns ``(card, info)`` with
+        ``card = (rank, suit)`` and ``info['color']`` ('red'/'black'). The suit is
+        colour-gated — the SVM only picks among suits of the detected colour — so
+        the read never contradicts the reliable colour signal."""
         f = _features(card_bgr, self._hog).reshape(1, -1)
-        y0, y1, x0, x1 = _HOLE_SUIT
-        red = bool(card_bgr.shape[0] > y1 and _is_red(card_bgr[y0:y1, x0:x1]))
+        red = bool(_is_red(self._suit_region(card_bgr, kind)))
         with self._lock:
             rank_m, suit_m = self._rank_clf, self._suit_clf
         rank = rank_m[1] if rank_m[0] == "const" else int(rank_m[1].predict(f)[0])
         suit = self._suit_of_colour(suit_m, f, red)
         return (rank, suit), {"color": "red" if red else "black"}
+
+    @staticmethod
+    def _suit_region(card, kind):
+        """The little suit-pip patch for the red/black colour test, by card kind.
+        Hole and board crops frame the card differently, so the pip sits in a
+        different place (regions measured to ~95% / ~94% on the labels)."""
+        h, w = card.shape[:2]
+        if kind == "H" and h >= 112:
+            return card[68:112, 0:52]                  # native hole crop
+        if kind == "H":
+            return card[int(0.17 * h):int(0.28 * h), 0:max(1, int(0.19 * w))]
+        return card[int(0.10 * h):int(0.30 * h), 12:max(13, int(0.30 * w))]   # board
 
     @staticmethod
     def _suit_of_colour(suit_m, f, red):

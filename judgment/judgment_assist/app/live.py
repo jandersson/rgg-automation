@@ -285,7 +285,9 @@ class PokerAdvisor:
         self.hole, self.board, self.hole_locked = [], [], False
         self._info = None                 # per-hole detection info (colour, conf)
         self._locked_screen = None        # what the screen read when the hand was set
-        self._cand, self._cand_n = None, 0   # stability filter for detection
+        self._cand, self._cand_n = None, 0   # stability filter for hole detection
+        self._board_fixed = set()         # board slots the hero typed (don't auto-overwrite)
+        self._board_cand, self._board_cand_n = None, 0   # board stability filter
         self._good_frame = None           # last LIVE (cards-present) frame, for capture
         self._key = self._eq = None
 
@@ -298,11 +300,14 @@ class PokerAdvisor:
     def set_board(self, cards):
         with self._lock:
             self.board = list(cards)
+            self._board_fixed = set(range(len(cards)))   # typed -> don't auto-overwrite
         self._capture(self.cfg.get("board", []), cards, "B")
 
     def append_board(self, cards):
         with self._lock:
+            start = len(self.board)
             self.board = self.board + list(cards)
+            self._board_fixed |= set(range(start, len(self.board)))
         self._capture(self.cfg.get("board", []), self.board, "B")
 
     def confirm(self):
@@ -319,6 +324,8 @@ class PokerAdvisor:
         with self._lock:
             self.hole, self.board, self.hole_locked = [], [], False
             self._info, self._cand, self._cand_n = None, None, 0
+            self._board_fixed, self._board_cand, self._board_cand_n = set(), None, 0
+            self._locked_screen = None
 
     # -- training capture ----------------------------------------------------
     def _capture(self, anchors, cards, prefix):
@@ -372,36 +379,57 @@ class PokerAdvisor:
         return True
 
     def _detect(self, frame, present):
-        """Keep the hole cards in sync with the screen. Reads the WHOLE card every
-        frame (better than the corner) so it can tell a genuinely NEW hand — the
-        PHYSICAL cards on screen changed — from a mere pause/resume, where the same
-        cards reappear. The latter must NOT wipe a correction you typed: pausing
-        dims the screen so the cards read as 'absent', and the old logic mistook the
-        resume for a new deal."""
+        """Keep the hole AND board cards in sync with the screen. Reads the WHOLE
+        card every frame (better than the corner) so it can tell a genuinely NEW
+        hand — the PHYSICAL hole cards changed — from a mere pause/resume, where the
+        same cards reappear (which must NOT wipe a typed correction: pausing dims
+        the screen so cards read as 'absent', and naive logic mistook resume for a
+        new deal). Board slots fill in as community cards appear; a typed board card
+        is held (the physical card can't change once dealt)."""
         if not present:
             return
         from ..vision.poker_cards import whole_roi
-        reads = []
-        for i, (x, y) in enumerate(self.cfg["hole"]):
-            l, t, w, h = whole_roi((x, y), f"H{i}")
-            reads.append(self.card_reader.recognize(frame[t:t + h, l:l + w]))
-        det = tuple(card for card, _ in reads)
-        self._cand_n = self._cand_n + 1 if det == self._cand else 1
-        self._cand = det
-        if self._cand_n < 2:                          # wait for a stable read (no half-deal)
-            return
-        info = [inf for _, inf in reads]
+        from ..vision.poker import board_count
+
+        def recog(slot, x, y):
+            l, t, w, h = whole_roi((x, y), slot)
+            return self.card_reader.recognize(frame[t:t + h, l:l + w], kind=slot[0])
+
+        hreads = [recog(f"H{i}", x, y) for i, (x, y) in enumerate(self.cfg["hole"])]
+        hdet = tuple(card for card, _ in hreads)
+        self._cand_n = self._cand_n + 1 if hdet == self._cand else 1
+        self._cand = hdet
+        hole_stable = self._cand_n >= 2
+
+        nb = board_count(frame, self.cfg)
+        bdet = tuple(recog(f"B{i}", *self.cfg["board"][i])[0] for i in range(nb))
+        self._board_cand_n = self._board_cand_n + 1 if bdet == self._board_cand else 1
+        self._board_cand = bdet
+        board_stable = self._board_cand_n >= 2
+
         with self._lock:
-            new_hand = self._locked_screen is not None and det != self._locked_screen
-            if not self.hole_locked:
-                if new_hand:                          # auto mode: fresh deal -> reset board
-                    self.board = []
-                self.hole, self._info, self._locked_screen = list(det), info, det
-            elif new_hand and self._cand_n >= 3:
-                # a typed correction is held until the physical cards really change
-                # (3 stable frames of a different read) — then it's a new hand.
-                self.hole_locked, self.board = False, []
-                self.hole, self._info, self._locked_screen = list(det), info, det
+            if hole_stable:
+                hinfo = [inf for _, inf in hreads]
+                new_hand = self._locked_screen is not None and hdet != self._locked_screen
+                if not self.hole_locked:
+                    if new_hand:                      # auto mode: fresh deal -> reset board
+                        self.board, self._board_fixed = [], set()
+                    self.hole, self._info, self._locked_screen = list(hdet), hinfo, hdet
+                elif new_hand and self._cand_n >= 3:
+                    # a typed correction is held until the physical cards really
+                    # change (3 stable frames of a different read) -> a new hand.
+                    self.hole_locked = False
+                    self.board, self._board_fixed = [], set()
+                    self.hole, self._info, self._locked_screen = list(hdet), hinfo, hdet
+            if board_stable:
+                if nb == 0:
+                    self.board, self._board_fixed = [], set()
+                else:                                 # fill non-typed slots; grow as dealt
+                    b = list(self.board) + [None] * (nb - len(self.board))
+                    for i in range(nb):
+                        if i not in self._board_fixed:
+                            b[i] = bdet[i]
+                    self.board = b[:nb]
 
     def _equity(self, hole, board, opp):
         key = (tuple(hole), tuple(board), opp)
@@ -425,6 +453,7 @@ class PokerAdvisor:
         with self._lock:
             hole, board = list(self.hole), list(self.board)
             locked, info = self.hole_locked, self._info
+            board_fixed = set(self._board_fixed)
 
         st = P.table_state(frame, self.cfg, self.reader)
         pot, to_call = st["pot"] or 0, st["to_call"]
@@ -459,17 +488,24 @@ class PokerAdvisor:
             cols = "/".join(i["color"] for i in info) if info else ""
             tag = f"  (detected {cols} - type to fix)"
         if behind:
-            # the board moved on but we don't know the new cards — ask for them
-            # rather than show stale, wrong-street odds.
+            # board moved on but we don't have the new cards yet. With auto-detect
+            # they'll fill in a frame or two; without it, the hero must type them.
+            if self.card_reader is not None:
+                return (f"YOU {cards_str(hole)}{tag}\n"
+                        f"BRD {cards_str(board) or '-'}  <- reading the {stage} board...\n"
+                        f"{live}\n>>> reading the board ({stage})...")
             return (f"YOU {cards_str(hole)}{tag}\n"
                     f"BRD {cards_str(board) or '-'}  <- {stage.upper()} on screen: type the board\n"
                     f"{live}\n"
                     f">>> type the {screen_nb} board cards for {stage} odds   e.g. | Qh 7c 2d")
+        # flag an auto-detected board (any slot not typed) so the hero verifies it
+        btag = "  (detected - type to fix)" if board and any(
+            i not in board_fixed for i in range(len(board))) else ""
         out = poker_decide(self._equity(hole, board, opp), to_call=to_call, pot=pot)
         made = f"  [{out['made_hand']}]" if "made_hand" in out else ""
         odds = f"  pot-odds {out['pot_odds']*100:.0f}%" if to_call > 0 else ""
         return (f"YOU {cards_str(hole)}{made}{tag}\n"
-                f"BRD {cards_str(board) or '-'} ({stage})\n"
+                f"BRD {cards_str(board) or '-'} ({stage}){btag}\n"
                 f"{live}\n"
                 f">>> {out['recommendation'].upper()}  eq {out['equity']*100:.0f}%{odds}")
 
@@ -626,10 +662,10 @@ def run(a):
     overlay = None
     if not a.no_overlay:
         from .overlay import SuggestionOverlay
-        hint = ("Advice updates live - just play. To FIX a card: click the box below,\n"
-                "type it (e.g. As Kd), Enter.  Click the game window to keep playing.\n"
-                "Enter on a correct hand banks it for training.  | Qh 7c 2d = board   "
-                "+ Td = deal   c = clear.  Close this window (or type q) to stop."
+        hint = ("Hole + board are auto-detected (verify them). Advice updates live -\n"
+                "just play; click the game window to keep playing. To FIX a card click\n"
+                "the box: hole = As Kd, board = | Qh 7c 2d, one more = + Td, c = clear.\n"
+                "Enter banks a correct hand for training.  Close (or type q) to stop."
                 ) if a.game == "poker" else ""
         overlay = SuggestionOverlay(x=a.x, y=a.y, input_enabled=(a.game == "poker"),
                                     hint=hint)

@@ -232,15 +232,24 @@ def test_poker_advisor_caches_equity_across_frames():
 class _FakeCardReader:
     """Stand-in HoleCardReader: returns the two given (card, info) pairs in
     alternation (one per corner), so each frame reads the same two cards."""
-    def __init__(self, pair):
-        self.pair, self.i, self.added = pair, 0, []
+    def __init__(self, hole, board=()):
+        self.hole, self.board = list(hole), list(board)
+        self.h, self.b, self.added = 0, 0, []
 
-    def set_pair(self, pair):
-        self.pair = pair                     # simulate the screen showing new cards
+    def set_pair(self, hole):
+        self.hole = list(hole)               # simulate the screen showing new hole cards
 
-    def recognize(self, corner_bgr):
-        r = self.pair[self.i % 2]
-        self.i += 1
+    def set_board_cards(self, board):
+        self.board = list(board)             # simulate new community cards
+
+    def recognize(self, corner_bgr, kind="H"):
+        if kind == "H":
+            self.b = 0                       # a frame is read hole-first, then board
+            r = self.hole[self.h % len(self.hole)]
+            self.h += 1
+            return r
+        r = self.board[self.b]
+        self.b += 1
         return r
 
     def add_exemplar(self, corner_bgr, rank, suit):
@@ -315,6 +324,31 @@ def test_poker_advisor_no_capture_when_learning_off():
 
 def _det(c0, c1):
     return ((parse_cards(c0)[0], {"color": "black"}), (parse_cards(c1)[0], {"color": "red"}))
+
+
+def _seq(*cards):
+    return [(parse_cards(c)[0], {"color": "black"}) for c in cards]
+
+
+def test_poker_advisor_autodetects_board():
+    cr = _FakeCardReader(_det("Ac", "Kd"), _seq("Qh", "7c", "2d"))
+    pa = PokerAdvisor(_FakeReader({"pot": 40, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
+                      _poker_cfg(), iters=2000, card_reader=cr)
+    f = _frame(3)                             # hole present + 3 community cards
+    pa.text(f); pa.text(f)                    # stabilise
+    assert cards_str(pa.hole) == "Ac Kd"
+    assert cards_str(pa.board) == "Qh 7c 2d"  # board auto-detected too
+
+
+def test_typed_board_card_held_while_new_card_autodetects():
+    cr = _FakeCardReader(_det("Ac", "Kd"), _seq("Qh", "7c", "2d"))
+    pa = PokerAdvisor(_FakeReader({"pot": 40, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
+                      _poker_cfg(), iters=2000, card_reader=cr)
+    pa.text(_frame(3)); pa.text(_frame(3))            # flop auto-detected: Qh 7c 2d
+    pa.set_board(parse_cards("Qh 7c 2s"))             # hero fixes the 3rd card
+    cr.set_board_cards(_seq("Qh", "7c", "2d", "Td"))  # turn dealt (4th card)
+    pa.text(_frame(4)); pa.text(_frame(4))
+    assert cards_str(pa.board) == "Qh 7c 2s Td"       # fix kept, new card auto-filled
 
 
 def test_correction_survives_pause_resume_same_hand():
