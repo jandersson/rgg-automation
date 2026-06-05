@@ -102,6 +102,35 @@ def summarize(o):
             f"{where.capitalize()}, re-reading the screen every {o['interval']}s.")
 
 
+class _GuiWriter:
+    """A stdout stand-in that appends to a tk Text widget (and mirrors to the real
+    stdout if there is one). Writes happen on the tk thread, so direct update is
+    safe."""
+    def __init__(self, widget, mirror=None):
+        self.widget, self.mirror = widget, mirror
+
+    def write(self, s):
+        if self.mirror:
+            try:
+                self.mirror.write(s)
+            except Exception:
+                pass
+        try:
+            self.widget.configure(state="normal")
+            self.widget.insert("end", s)
+            self.widget.see("end")
+            self.widget.configure(state="disabled")
+        except Exception:
+            pass
+
+    def flush(self):
+        if self.mirror:
+            try:
+                self.mirror.flush()
+            except Exception:
+                pass
+
+
 def terminate_all(procs):
     """Terminate any still-running spawned overlays. Returns how many were killed."""
     n = 0
@@ -238,6 +267,14 @@ class LauncherApp:
         self._pollers = set()        # confirm-hotkey VKs already being polled
         self.corr_mode = tk.StringVar(value="dropdown")
         self._build_corrections(root, row=8)
+
+        # log pane: session output (learning, errors) instead of a console
+        lf = ttk.LabelFrame(root, text="Log")
+        lf.grid(row=9, column=0, sticky="ew", **pad)
+        self.log = tk.Text(lf, height=6, width=52, wrap="word", bg="#0a0a0a",
+                           fg="#cccccc", font=("Consolas", 8), state="disabled")
+        self.log.pack(fill="both", expand=True, padx=4, pady=4)
+        self._orig_stdout = None
 
         self.v["game"].trace_add("write", lambda *_: self._toggle())
         self.corr_mode.trace_add("write", lambda *_: self._show_corr_mode())
@@ -419,6 +456,10 @@ class LauncherApp:
         self.cf2.grid(row=self._corr_row, column=0, sticky="ew", padx=8, pady=3)
         self._show_corr_mode()
         self.status.configure(text="overlay running (corrections below)", foreground="#070")
+        self._orig_stdout = sys.stdout              # capture session output into the Log pane
+        sys.stdout = _GuiWriter(self.log, self._orig_stdout)
+        print(f"session started - detect {'on' if card_reader else 'off'}, "
+              f"learn {'on' if training else 'off'}")
         self._tick()
 
     def _confirm_hotkey(self):
@@ -466,6 +507,9 @@ class LauncherApp:
             s["overlay"].close()
         except Exception:
             pass
+        if self._orig_stdout is not None:           # restore stdout
+            sys.stdout = self._orig_stdout
+            self._orig_stdout = None
         self.cf2.grid_remove()
         self._sess = None
 
