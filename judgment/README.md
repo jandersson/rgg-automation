@@ -84,10 +84,10 @@ You can also mark HUD/card ROIs on a saved Steam **F12** screenshot with
 
 **Poker is semi-automatic.** The overlay auto-reads everything it can — pot,
 street, active-opponent count, cost-to-call — and **auto-detects your hole
-cards**, which you confirm or correct by typing. Card reading off the screen is a
-documented ~80% wall (see [POKER.md](POKER.md)), so a detected hand is a *guess*:
-suit colour is reliable, rank/exact-suit are not. A typed hand locks until the
-next deal (the hole slots emptying re-arms detection):
+cards**, which you confirm or correct by typing. Detection is a whole-card HOG +
+SVM classifier (~74% rank / ~84% suit on hole cards, colour-gated; see
+[POKER.md](POKER.md)) — good as a *seed* but not autonomous, so you confirm/fix
+it. A typed hand locks until the next deal (the hole slots emptying re-arms it):
 
 ```powershell
 uv run python -m judgment_assist.app.live poker
@@ -96,13 +96,15 @@ uv run python -m judgment_assist.app.live poker
 ```
 
 **It learns as you play.** Every hand you confirm (bare Enter) or correct (type
-the cards) is saved as a new labeled corner crop in `data/poker_cards` — the same
-format the detector reads — and hot-added to the running reader, so detection
-improves within the session and more so on the next launch. Board cards you type
-are captured too. Near-identical crops are deduped; `--no-learn` turns it off.
+the cards) is saved as a new labeled whole-card crop in `data/poker_cards` — the
+same format the detector reads — and hot-added to the running reader (refitting the
+SVM), so detection improves within the session and more on the next launch. Crops
+are taken from the last *live* frame, so correcting while the game is paused/tabbed
+away still grabs good pixels. Board cards you type are captured too; near-identical
+crops are deduped; `--no-learn` turns it off.
 
 It needs the `poker` ROIs, the white-on-plate digit glyphs (`--poker-digits`,
-default `data/poker_digits`), and the labeled corner crops used for detection
+default `data/poker_digits`), and the labeled whole-card crops used for detection
 (`--poker-cards`, default `data/poker_cards`; pass `--no-detect` to type every
 card). The opponent Bet plates and fold banners are read label-free (folds
 spotted by the cyan banner icon).

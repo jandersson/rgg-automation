@@ -281,7 +281,7 @@ class PokerAdvisor:
         self._info = None                 # per-hole detection info (colour, conf)
         self._present_last = False        # were both hole slots up last frame?
         self._cand, self._cand_n = None, 0   # stability filter for detection
-        self._frame = None                # latest frame, for training capture
+        self._good_frame = None           # last LIVE (cards-present) frame, for capture
         self._key = self._eq = None
 
     # -- hero input (called from the CardInput thread) ------------------------
@@ -317,13 +317,17 @@ class PokerAdvisor:
 
     # -- training capture ----------------------------------------------------
     def _capture(self, anchors, cards, prefix):
-        """Save each face-up card's corner with its (now-known) label as a new
-        exemplar, and hot-add it to the live reader. No-op when learning is off."""
+        """Save each face-up card's WHOLE-card crop with its (now-known) label as a
+        new exemplar, and hot-add it to the live reader. Captures from the last
+        LIVE frame (cards present) — NOT the current one, which may be the
+        dimmed/paused screen if you tabbed to the console to type. No-op when
+        learning is off."""
         if self.training is None:
             return
         from ..vision.poker import card_present
+        from ..vision.poker_cards import whole_roi
         with self._lock:
-            frame = self._frame
+            frame = self._good_frame
         if frame is None:
             return
         cw, ch = self.cfg["corner"]
@@ -335,29 +339,47 @@ class PokerAdvisor:
             corner = frame[y:y + ch, x:x + cw]
             if corner.shape[:2] != (ch, cw) or not card_present(corner):
                 continue
+            l, t, w, h = whole_roi((x, y), f"{prefix}{i}")
+            whole = frame[t:t + h, l:l + w]
+            if whole.shape[:2] != (h, w):
+                continue
             rank, suit = card
-            if self.training.save(corner, rank, suit, f"{prefix}{i}"):
+            if self.training.save(whole, rank, suit, f"{prefix}{i}"):
                 if self.card_reader is not None:
-                    self.card_reader.add_exemplar(corner, rank, suit)
+                    self.card_reader.add_exemplar(whole, rank, suit)
                 saved.append(card_str(card))
         if saved:
             print(f"  + learned {' '.join(saved)} ({len(saved)} new crop(s))")
 
     # -- auto detection ------------------------------------------------------
-    def _detect(self, frame):
-        """Update the hole cards from the screen unless the hero has typed them.
-        Re-detects at each new deal (hole slots empty -> up); a 2-frame stability
-        filter avoids reading a half-dealt card."""
+    def _hole_present(self, frame):
+        """Both hole slots showing a bright, face-up card (gated on the corner —
+        a dimmed/paused screen reads as not-present, which is what we want)."""
         from ..vision.poker import card_present
         cw, ch = self.cfg["corner"]
-        corners = [frame[y:y + ch, x:x + cw] for x, y in self.cfg["hole"]]
-        present = all(c.shape[:2] == (ch, cw) and card_present(c) for c in corners)
+        hole = self.cfg.get("hole", [])
+        if not hole:
+            return False
+        for x, y in hole:
+            c = frame[y:y + ch, x:x + cw]
+            if c.shape[:2] != (ch, cw) or not card_present(c):
+                return False
+        return True
+
+    def _detect(self, frame, present):
+        """Update the hole cards from the screen unless the hero has typed them.
+        Reads the WHOLE card (better than the corner); re-detects at each new deal
+        (hole slots empty -> up); a 2-frame stability filter avoids a half-deal."""
+        from ..vision.poker_cards import whole_roi
         if present and not self._present_last:        # a new hand was dealt
             with self._lock:
                 self.hole_locked, self.board = False, []
                 self._cand, self._cand_n = None, 0
         if present and not self.hole_locked:
-            reads = [self.card_reader.recognize(c) for c in corners]
+            reads = []
+            for i, (x, y) in enumerate(self.cfg["hole"]):
+                l, t, w, h = whole_roi((x, y), f"H{i}")
+                reads.append(self.card_reader.recognize(frame[t:t + h, l:l + w]))
             det = tuple(card for card, _ in reads)
             self._cand_n = self._cand_n + 1 if det == self._cand else 1
             self._cand = det
@@ -379,10 +401,14 @@ class PokerAdvisor:
 
     def text(self, frame):
         from ..vision import poker as P
-        with self._lock:
-            self._frame = frame           # for training capture in the input thread
+        # Cache the last LIVE frame (hole cards present) for training capture, so a
+        # correction typed while the game is paused/tabbed-away uses good pixels.
+        present = self._hole_present(frame) if (self.card_reader or self.training) else False
+        if present:
+            with self._lock:
+                self._good_frame = frame
         if self.card_reader is not None:
-            self._detect(frame)
+            self._detect(frame, present)
         with self._lock:
             hole, board = list(self.hole), list(self.board)
             locked, info = self.hole_locked, self._info
@@ -491,7 +517,7 @@ def run(a):
             try:
                 from ..vision.poker_cards import TrainingWriter
                 training = TrainingWriter(a.poker_cards)
-                print(f"  learning ON — confirmed/corrected cards saved to {a.poker_cards}")
+                print(f"  learning ON - confirmed/corrected cards saved to {a.poker_cards}")
             except RuntimeError as e:
                 print(f"  (learning off — {e})")
         poker = PokerAdvisor(reader, roi_cfg, opp_fallback=a.opp, iters=a.iters,
