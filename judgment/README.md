@@ -78,20 +78,24 @@ uv run python -m judgment_assist.app.live blackjack                             
 You can also mark HUD/card ROIs on a saved Steam **F12** screenshot with
 `--image captures\shot.jpg` (avoids the game's pause-on-focus-loss).
 
-**Poker is semi-automatic.** Card reading off the screen is a documented ~80%
-wall (see [POKER.md](POKER.md)), so you type your hole + board cards and the
-overlay auto-reads everything else — pot, street, active-opponent count and
-cost-to-call — then shows equity + pot-odds + a call/raise/fold call:
+**Poker is semi-automatic.** The overlay auto-reads everything it can — pot,
+street, active-opponent count, cost-to-call — and **auto-detects your hole
+cards**, which you confirm or correct by typing. Card reading off the screen is a
+documented ~80% wall (see [POKER.md](POKER.md)), so a detected hand is a *guess*:
+suit colour is reliable, rank/exact-suit are not. A typed hand locks until the
+next deal (the hole slots emptying re-arms detection):
 
 ```powershell
-uv run python -m judgment_assist.app.live poker          # then type your cards as the hand develops:
-#   Ah Kh | Qh 7h 2h   (hole | board)    + Td  deal a card    c  clear    q  quit
+uv run python -m judgment_assist.app.live poker
+#   it shows e.g.  YOU 9c 8h  (detected black/red - type to fix)
+#   Ah Kh  confirm/fix hole   | Qh 7h 2h  board   + Td  deal   c  clear   q  quit
 ```
 
-It needs only the `poker` ROIs and the white-on-plate digit templates — no card
-library: `calibrate mark --game poker --window Judgment` plus the poker digit
-glyphs (`--poker-digits`, default `data/poker_digits`). The opponent Bet plates
-and fold banners are read label-free (folds spotted by the cyan banner icon).
+It needs the `poker` ROIs, the white-on-plate digit glyphs (`--poker-digits`,
+default `data/poker_digits`), and the labeled corner crops used for detection
+(`--poker-cards`, default `data/poker_cards`; pass `--no-detect` to type every
+card). The opponent Bet plates and fold banners are read label-free (folds
+spotted by the cyan banner icon).
 
 The card reader matches rank glyphs at multiple scales (cards render smaller in
 some cascade positions) with per-rank score floors for the court letters (Q/J
@@ -138,6 +142,7 @@ judgment_assist/
     locate/recognizer  card localize + multi-scale rank match (blackjack)
     hud.py             HUD digit reader (badge Otsu + poker white-on-plate mode)
     poker.py           label-free poker state (street, opp bets/folds, to_call)
+    poker_cards.py     advisory hole-card detection (colour + exemplar match)
   capture/            screen-region grab (mss) + calibration + crop harvesting
   labeling.py         reusable image-labeling core (LabelSession)
   sessions.py         SQLite session/hand telemetry + summary

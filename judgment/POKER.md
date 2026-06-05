@@ -60,10 +60,26 @@ for trustworthy hand advice, and very likely never will be.
 
 ## The realistic tool — semi-automatic
 
-Accept that the cards can't be auto-read; lean on what works:
-- You type your 2 hole cards + the board (live overlay or the manual CLI).
+The cards can't be auto-read *reliably*, but a guess-and-correct loop sidesteps
+that — the screen seeds the input, the human is the safety net:
+- The tool **auto-detects your 2 hole cards** and shows them for you to confirm or
+  correct; you type the board as it comes (live overlay or the manual CLI).
 - The tool auto-reads the **pot, street, active-opponent count and to_call** and
   shows equity + pot odds + a fold/call/raise call.
+
+### Hole-card auto-detection (advisory) — `vision/poker_cards.py`
+
+A best-effort `HoleCardReader` seeds the overlay with the hole cards; the hero
+confirms or fixes them (a typed hand locks until the next deal re-arms it). It is
+deliberately **advisory, not authoritative** — measured on the labeled corners:
+- **suit colour** red/black ≈ 95% (ink-pixel redness) — the strong signal, shown
+  prominently so a wrong rank/suit is easy to spot.
+- **rank** ≈ 50-60% (nearest-exemplar match vs the labeled corner crops) and
+  exact within-colour suit ≈ weak — i.e. expect to correct roughly half of hands.
+
+That's still a win: a seeded guess is never worse than typing (right → zero
+keystrokes, wrong → type as before). To improve it, grow the exemplar library by
+labeling more captures (`label --poker`); the rank ceiling is ~75-80% (above).
 
 That's a genuinely useful poker assistant that sidesteps the one thing the screen
 won't give us. **Built** (`app/live.py poker`):

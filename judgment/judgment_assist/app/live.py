@@ -21,12 +21,15 @@ Current scope:
               OFF by default (``--count``): this is a multi-seat table, so the
               reader can't see most of the shoe and the count isn't usable for
               betting (issue #3). The HUD-total advice is the reliable product.
-  poker     — SEMI-AUTO. You type your hole + board cards (poker card reading off
-              the screen is the documented ~80% wall — see POKER.md); the loop
-              auto-reads the pot, street, active-opponent count and to_call, and
-              shows equity + pot-odds + a call/raise/fold call. Needs the
-              ``poker`` ROIs and the white-glyph poker digit templates
-              (``--poker-digits``, default ``data/poker_digits``).
+  poker     — SEMI-AUTO. The loop auto-reads the pot, street, active-opponent
+              count and to_call, and auto-DETECTS your hole cards (best-effort —
+              card reading is the documented ~80% wall, POKER.md, so it's a guess:
+              suit colour is reliable, rank/exact-suit are not). You confirm or
+              correct the hand by typing; a typed hand locks until the next deal.
+              Shows equity + pot-odds + a call/raise/fold call. Needs the ``poker``
+              ROIs, the white-glyph poker digit templates (``--poker-digits``), and
+              the labeled corner crops for detection (``--poker-cards``;
+              ``--no-detect`` to type everything manually).
 """
 from __future__ import annotations
 
@@ -197,35 +200,27 @@ def save_miss(dirpath, frame, hud_total, card_reads):
 
 
 class CardInput:
-    """Background stdin reader for semi-auto card entry. Poker card reading off the
-    screen is the documented ~80% wall (see POKER.md), so the hero types their own
-    cards as the hand develops while the loop auto-reads everything else. The live
-    loop polls :meth:`get` each frame; this thread owns stdin.
+    """Background stdin reader that forwards parsed card entries to a ``target``
+    (the :class:`PokerAdvisor`). The hero confirms/corrects the auto-detected
+    hand and types the board as it develops; this thread owns stdin.
 
-        Ah Kh                set your hole cards (preflop)
+        Ah Kh                set/correct your hole cards (locks the auto-detect)
         Ah Kh | Qh 7h 2h     set hole + board
         | Qh 7h 2h           update the board only (keep hole)
         + Td                 deal one more board card (turn / river)
-        c                    clear        q     quit
+        c                    clear -> hand back to auto-detect    q  quit
     """
 
-    def __init__(self, start=True):
+    def __init__(self, target, start=True):
         import threading
-        self.hole, self.board, self.stop = [], [], False
-        self._lock = threading.Lock()
+        self.target, self.stop = target, False
         if start:
             threading.Thread(target=self._loop, daemon=True).start()
 
-    def get(self):
-        with self._lock:
-            return list(self.hole), list(self.board)
-
     def apply(self, line):
-        """Apply one input line to the card state. Returns False if it was a quit,
-        else True. Raises ValueError on unparseable cards (caller keeps going).
-
-        Cards are parsed *before* the state is touched, so a typo leaves the
-        previous hole/board intact rather than half-updating them."""
+        """Apply one input line by calling the target. Returns False on quit, else
+        True. Raises ValueError on unparseable cards (the loop keeps going).
+        Cards are parsed before the target is touched, so a typo changes nothing."""
         line = line.strip()
         if not line:
             return True
@@ -233,25 +228,19 @@ class CardInput:
             self.stop = True
             return False
         if line.lower() in ("c", "clear"):
-            with self._lock:
-                self.hole, self.board = [], []
-            return True
-        if line.startswith("+"):                       # deal one more board card
-            add = parse_cards(line[1:])
-            with self._lock:
-                self.board = self.board + add
+            self.target.clear()
+        elif line.startswith("+"):                     # deal one more board card
+            self.target.append_board(parse_cards(line[1:]))
         elif "|" in line:                              # hole | board
             h, b = line.split("|", 1)
-            hole = parse_cards(h) if h.strip() else None
             board = parse_cards(b) if b.strip() else []
-            with self._lock:
-                if hole is not None:
-                    self.hole = hole
-                self.board = board
+            hole = parse_cards(h) if h.strip() else None
+            if hole is not None:
+                self.target.set_hole(hole)
+            self.target.set_board(board)
         else:                                          # hole only -> preflop
-            hole = parse_cards(line)
-            with self._lock:
-                self.hole, self.board = hole, []
+            self.target.set_hole(parse_cards(line))
+            self.target.set_board([])
         return True
 
     def _loop(self):
@@ -262,22 +251,74 @@ class CardInput:
                     break
             except Exception as e:  # noqa: BLE001 - keep the input loop alive
                 print("  bad cards:", e)
-                continue
-            if line.strip():
-                hh, bb = self.get()
-                print(f"  hole [{cards_str(hh)}]  board [{cards_str(bb)}]")
 
 
 class PokerAdvisor:
-    """Semi-auto poker advice for one frame: the hero supplies hole+board, the
-    table state (pot / street / active opponents / to_call) is auto-read, and the
-    Monte-Carlo equity is cached so only the cheap pot-odds decision recomputes
-    each frame (equity rerun only when the cards or opponent count change)."""
+    """Semi-auto poker advice. Auto-reads the table state (pot / street / active
+    opponents / to_call) every frame and **auto-detects the hero's hole cards**,
+    which the hero confirms or corrects by typing. Card reading is the documented
+    ~80% wall (POKER.md), so a detected hand is a *guess* shown for correction:
+    suit colour is reliable, rank/exact-suit are not. A typed hand locks until the
+    hand ends (hole slots empty -> next deal re-detects). Monte-Carlo equity is
+    cached so only the cheap pot-odds decision recomputes per frame.
 
-    def __init__(self, reader, cfg, opp_fallback=2, iters=12000):
+    Card state is owned here (not in CardInput) so detection and the hero's typed
+    override share one source of truth; the stdin thread mutates it under a lock."""
+
+    def __init__(self, reader, cfg, opp_fallback=2, iters=12000, card_reader=None):
+        import threading
         self.reader, self.cfg = reader, cfg
         self.opp_fallback, self.iters = opp_fallback, iters
+        self.card_reader = card_reader
+        self._lock = threading.Lock()
+        self.hole, self.board, self.hole_locked = [], [], False
+        self._info = None                 # per-hole detection info (colour, conf)
+        self._present_last = False        # were both hole slots up last frame?
+        self._cand, self._cand_n = None, 0   # stability filter for detection
         self._key = self._eq = None
+
+    # -- hero input (called from the CardInput thread) ------------------------
+    def set_hole(self, cards):
+        with self._lock:
+            self.hole, self.hole_locked, self._info = list(cards), True, None
+
+    def set_board(self, cards):
+        with self._lock:
+            self.board = list(cards)
+
+    def append_board(self, cards):
+        with self._lock:
+            self.board = self.board + list(cards)
+
+    def clear(self):
+        with self._lock:
+            self.hole, self.board, self.hole_locked = [], [], False
+            self._info, self._cand, self._cand_n = None, None, 0
+
+    # -- auto detection ------------------------------------------------------
+    def _detect(self, frame):
+        """Update the hole cards from the screen unless the hero has typed them.
+        Re-detects at each new deal (hole slots empty -> up); a 2-frame stability
+        filter avoids reading a half-dealt card."""
+        from ..vision.poker import card_present
+        cw, ch = self.cfg["corner"]
+        corners = [frame[y:y + ch, x:x + cw] for x, y in self.cfg["hole"]]
+        present = all(c.shape[:2] == (ch, cw) and card_present(c) for c in corners)
+        if present and not self._present_last:        # a new hand was dealt
+            with self._lock:
+                self.hole_locked, self.board = False, []
+                self._cand, self._cand_n = None, 0
+        if present and not self.hole_locked:
+            reads = [self.card_reader.recognize(c) for c in corners]
+            det = tuple(card for card, _ in reads)
+            self._cand_n = self._cand_n + 1 if det == self._cand else 1
+            self._cand = det
+            if self._cand_n >= 2:                      # stable -> accept the guess
+                with self._lock:
+                    if not self.hole_locked:
+                        self.hole = list(det)
+                        self._info = [info for _, info in reads]
+        self._present_last = present
 
     def _equity(self, hole, board, opp):
         key = (tuple(hole), tuple(board), opp)
@@ -288,8 +329,14 @@ class PokerAdvisor:
             self._eq, self._key = eq, key
         return self._eq
 
-    def text(self, frame, hole, board):
+    def text(self, frame):
         from ..vision import poker as P
+        if self.card_reader is not None:
+            self._detect(frame)
+        with self._lock:
+            hole, board = list(self.hole), list(self.board)
+            locked, info = self.hole_locked, self._info
+
         st = P.table_state(frame, self.cfg, self.reader)
         pot, to_call = st["pot"] or 0, st["to_call"]
         # The street comes from the board the hero TYPED (authoritative), not the
@@ -303,16 +350,24 @@ class PokerAdvisor:
         opp_src = "active" if n_auto is not None else "set"
         live = f"POT {pot}  {stage.upper()}  vs {opp} {opp_src}  to-call {to_call}"
         if len(hole) != 2:
-            return "poker: type your hole cards  e.g.  Ah Kh\n" + live
+            hint = "type your hole cards  e.g.  Ah Kh" if self.card_reader is None \
+                else "waiting for your hole cards (deal in)..."
+            return f"poker: {hint}\n" + live
         dupes = len(set(hole) | set(board)) != len(hole) + len(board)
         if dupes:
             return f"poker: duplicate card in {cards_str(hole)} / {cards_str(board)}\n" + live
         if opp < 1:
             return f"YOU {cards_str(hole)} - all opponents folded, pot is yours\n" + live
+        # A detected (not yet confirmed) hand is a guess — flag it and show the
+        # reliable colour so the hero can correct rank/suit at a glance.
+        tag = ""
+        if not locked:
+            cols = "/".join(i["color"] for i in info) if info else ""
+            tag = f"  (detected {cols} - type to fix)"
         out = poker_decide(self._equity(hole, board, opp), to_call=to_call, pot=pot)
         made = f"  [{out['made_hand']}]" if "made_hand" in out else ""
         odds = f"  pot-odds {out['pot_odds']*100:.0f}%" if to_call > 0 else ""
-        return (f"YOU {cards_str(hole)}{made}\n"
+        return (f"YOU {cards_str(hole)}{made}{tag}\n"
                 f"BRD {cards_str(board) or '-'} ({stage})\n"
                 f"{live}\n"
                 f">>> {out['recommendation'].upper()}  eq {out['equity']*100:.0f}%{odds}")
@@ -370,14 +425,25 @@ def run(a):
             session_id = store.start_session("blackjack", config=a.config)
             print(f"  tracking hands to session {session_id} in {a.db}")
     else:
-        # Semi-auto poker: the hero types their cards (auto card reading is the
-        # documented ~80% wall); we auto-read pot / street / opponents / to_call.
+        # Semi-auto poker: we auto-read pot / street / opponents / to_call and
+        # auto-DETECT the hero's hole cards (best-effort — card reading is the
+        # documented ~80% wall, POKER.md), shown for the hero to confirm/correct.
         from ..vision.hud import HudReader
         reader = HudReader(a.poker_digits, min_confidence=a.min_confidence)
-        poker = PokerAdvisor(reader, roi_cfg, opp_fallback=a.opp, iters=a.iters)
-        cards_in = CardInput()
-        print("semi-auto poker - type your cards as the hand develops:")
-        print("  Ah Kh | Qh 7h 2h   (hole | board)    + Td  deal a card    c  clear    q  quit")
+        card_reader = None
+        if not a.no_detect:
+            try:
+                from ..vision.poker_cards import HoleCardReader
+                card_reader = HoleCardReader(a.poker_cards)
+            except RuntimeError as e:
+                print(f"  (hole-card auto-detect off — {e})")
+        poker = PokerAdvisor(reader, roi_cfg, opp_fallback=a.opp, iters=a.iters,
+                             card_reader=card_reader)
+        cards_in = CardInput(poker)
+        mode = "auto-detects your hole cards; correct any wrong" if card_reader \
+            else "type your cards"
+        print(f"semi-auto poker - {mode} as the hand develops:")
+        print("  Ah Kh  confirm/fix hole   | Qh 7h 2h  board   + Td  deal   c  clear   q  quit")
 
     overlay = None
     if not a.no_overlay:
@@ -451,8 +517,7 @@ def run(a):
                     if shoe is not None:
                         text += "\n" + count_line(shoe)
                 else:
-                    hole, board = cards_in.get()
-                    text = poker.text(frame, hole, board)
+                    text = poker.text(frame)
                 if overlay:
                     overlay.update_text(text)
                 else:
@@ -476,6 +541,10 @@ def main(argv=None):
     p.add_argument("--digits", default="data/digits", help="digit templates (blackjack HUD)")
     p.add_argument("--poker-digits", dest="poker_digits", default="data/poker_digits",
                    help="white-glyph digit templates for the poker pot/bet plates")
+    p.add_argument("--poker-cards", dest="poker_cards", default="data/poker_cards",
+                   help="labeled corner crops used to auto-detect hole cards (advisory)")
+    p.add_argument("--no-detect", dest="no_detect", action="store_true",
+                   help="disable hole-card auto-detection (type all cards manually)")
     p.add_argument("--interval", type=float, default=0.7, help="seconds between reads")
     p.add_argument("--min-confidence", dest="min_confidence", type=float, default=0.6)
     p.add_argument("--no-overlay", action="store_true", help="print to console instead")

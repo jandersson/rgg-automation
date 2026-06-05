@@ -96,36 +96,42 @@ def test_hand_tracker_skips_hand_not_watched_from_play():
 
 
 # ----------------------------------------------------- semi-auto poker input --
-def test_card_input_sets_hole_and_board():
-    ci = CardInput(start=False)
-    ci.apply("Ah Kh")                       # hole only -> preflop
-    assert ci.get() == (parse_cards("Ah Kh"), [])
+def test_card_input_forwards_hole_and_board_to_target():
+    pa = PokerAdvisor(reader=None, cfg={})
+    ci = CardInput(pa, start=False)
+    ci.apply("Ah Kh")                       # hole only -> preflop, locks
+    assert pa.hole == parse_cards("Ah Kh") and pa.board == [] and pa.hole_locked
     ci.apply("Ah Kh | Qh 7h 2h")            # hole + board
-    assert cards_str(ci.get()[1]) == "Qh 7h 2h"
+    assert cards_str(pa.board) == "Qh 7h 2h"
 
 
 def test_card_input_append_and_board_only():
-    ci = CardInput(start=False)
+    pa = PokerAdvisor(reader=None, cfg={})
+    ci = CardInput(pa, start=False)
     ci.apply("Ah Kh | Qh 7h 2h")
     ci.apply("+ Td")                         # deal the turn, keep hole+flop
-    hole, board = ci.get()
-    assert cards_str(hole) == "Ah Kh" and cards_str(board) == "Qh 7h 2h Td"
+    assert cards_str(pa.hole) == "Ah Kh" and cards_str(pa.board) == "Qh 7h 2h Td"
     ci.apply("| Qh 7h 2h Td Js")             # update board only, hole untouched
-    assert cards_str(ci.get()[0]) == "Ah Kh"
-    assert cards_str(ci.get()[1]) == "Qh 7h 2h Td Js"
+    assert cards_str(pa.hole) == "Ah Kh"
+    assert cards_str(pa.board) == "Qh 7h 2h Td Js"
+
+
+def test_card_input_clear_and_quit():
+    pa = PokerAdvisor(reader=None, cfg={})
+    ci = CardInput(pa, start=False)
+    ci.apply("Ah Kh")
+    ci.apply("c")                            # clear -> back to auto-detect
+    assert pa.hole == [] and not pa.hole_locked
+    assert ci.apply("q") is False and ci.stop is True
 
 
 def test_card_input_bad_cards_leave_state_intact():
-    ci = CardInput(start=False)
+    pa = PokerAdvisor(reader=None, cfg={})
+    ci = CardInput(pa, start=False)
     ci.apply("Ah Kh")
     with pytest.raises(ValueError):
         ci.apply("Zz Kh")                    # typo -> raises, state unchanged
-    assert cards_str(ci.get()[0]) == "Ah Kh"
-
-
-def test_card_input_quit():
-    ci = CardInput(start=False)
-    assert ci.apply("q") is False and ci.stop is True
+    assert cards_str(pa.hole) == "Ah Kh"
 
 
 class _FakeReader:
@@ -140,8 +146,10 @@ class _FakeReader:
 
 def _poker_cfg():
     # board ROIs land on dealt felt; banners are blank (all active). String keys
-    # for the number ROIs let _FakeReader resolve them.
+    # for the number ROIs let _FakeReader resolve them. hole anchors point at the
+    # painted board cards so card_present sees a face-up card during detection.
     return {"corner": [70, 105],
+            "hole": [[296, 298], [562, 298]],
             "board": [[296, 298], [562, 298], [838, 298], [1128, 298], [1410, 298]],
             "pot": "pot", "bet": "my",
             "opp_bet": ["o0", "o1", "o2"],
@@ -159,8 +167,8 @@ def _felt_with_board(n):
 
 def test_poker_advisor_prompts_without_hole_cards():
     reader = _FakeReader({"pot": 40, "my": 0, "o0": 20, "o1": 20, "o2": 0})
-    pa = PokerAdvisor(reader, _poker_cfg(), iters=2000)
-    txt = pa.text(_felt_with_board(0), [], [])
+    pa = PokerAdvisor(reader, _poker_cfg(), iters=2000)     # no card_reader -> manual
+    txt = pa.text(_felt_with_board(0))
     assert "type your hole cards" in txt
     assert "to-call 20" in txt and "vs 3 active" in txt    # auto-read still shown
 
@@ -169,7 +177,9 @@ def test_poker_advisor_full_advice_uses_autoread_state():
     # flop, hero owes 5 to call into a 20 pot vs 3 active opponents
     reader = _FakeReader({"pot": 20, "my": 15, "o0": 20, "o1": 20, "o2": 20})
     pa = PokerAdvisor(reader, _poker_cfg(), iters=4000)
-    txt = pa.text(_felt_with_board(3), parse_cards("Ac As"), parse_cards("Ah Kd 9s"))
+    pa.set_hole(parse_cards("Ac As"))
+    pa.set_board(parse_cards("Ah Kd 9s"))
+    txt = pa.text(_felt_with_board(3))
     assert "vs 3 active" in txt and "to-call 5" in txt
     assert "three of a kind" in txt and ">>> RAISE" in txt
 
@@ -177,18 +187,64 @@ def test_poker_advisor_full_advice_uses_autoread_state():
 def test_poker_advisor_flags_duplicate_cards():
     reader = _FakeReader({"pot": 20, "my": 0, "o0": 0, "o1": 0, "o2": 0})
     pa = PokerAdvisor(reader, _poker_cfg(), iters=2000)
-    txt = pa.text(_felt_with_board(3), parse_cards("Ah Kd"), parse_cards("Ah 2c 3d"))
-    assert "duplicate card" in txt
+    pa.set_hole(parse_cards("Ah Kd"))
+    pa.set_board(parse_cards("Ah 2c 3d"))
+    assert "duplicate card" in pa.text(_felt_with_board(3))
 
 
 def test_poker_advisor_caches_equity_across_frames():
     reader = _FakeReader({"pot": 20, "my": 0, "o0": 0, "o1": 0, "o2": 0})
     pa = PokerAdvisor(reader, _poker_cfg(), iters=4000)
+    pa.set_hole(parse_cards("Ac As"))
+    pa.set_board(parse_cards("Ah Kd 9s"))
     f = _felt_with_board(3)
-    pa.text(f, parse_cards("Ac As"), parse_cards("Ah Kd 9s"))
+    pa.text(f)
     first = pa._eq
-    pa.text(f, parse_cards("Ac As"), parse_cards("Ah Kd 9s"))
+    pa.text(f)
     assert pa._eq is first                                  # same cards -> not recomputed
+
+
+class _FakeCardReader:
+    """Stand-in HoleCardReader: returns the two given (card, info) pairs in
+    alternation (one per corner), so each frame reads the same two cards."""
+    def __init__(self, pair):
+        self.pair, self.i = pair, 0
+
+    def recognize(self, corner_bgr):
+        r = self.pair[self.i % 2]
+        self.i += 1
+        return r
+
+
+def test_poker_advisor_autodetects_hole_then_locks_on_override():
+    reader = _FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0})
+    det = ((parse_cards("Ac")[0], {"color": "black"}),
+           (parse_cards("Kd")[0], {"color": "red"}))
+    pa = PokerAdvisor(reader, _poker_cfg(), iters=2000,
+                      card_reader=_FakeCardReader(det))
+    f = _felt_with_board(2)                  # both hole slots show a face-up card
+    pa.text(f)                               # 1st frame: candidate, not yet stable
+    assert pa.hole == []
+    txt = pa.text(f)                         # 2nd identical frame: accept the guess
+    assert cards_str(pa.hole) == "Ac Kd" and not pa.hole_locked
+    assert "(detected black/red - type to fix)" in txt
+    pa.set_hole(parse_cards("Ah Kh"))        # hero corrects -> locks, detection stops
+    pa.text(f)
+    assert cards_str(pa.hole) == "Ah Kh" and pa.hole_locked
+
+
+def test_poker_advisor_redetects_after_new_deal():
+    reader = _FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0})
+    pa = PokerAdvisor(reader, _poker_cfg(), iters=2000,
+                      card_reader=_FakeCardReader(((parse_cards("7c")[0], {"color": "black"}),
+                                                   (parse_cards("2d")[0], {"color": "red"}))))
+    pa.set_hole(parse_cards("Ah Kh"))        # locked from a previous hand
+    empty = _felt_with_board(0)              # hole slots empty (between hands)
+    pa.text(empty)
+    assert pa.hole_locked                    # still locked until a card appears...
+    f = _felt_with_board(2)                  # new deal: slots go empty -> up
+    pa.text(f); pa.text(f)
+    assert not pa.hole_locked and cards_str(pa.hole) == "7c 2d"   # re-detected
 
 
 def test_log_hand_writes_a_csv_row(tmp_path):
