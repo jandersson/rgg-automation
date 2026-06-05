@@ -233,7 +233,14 @@ class LauncherApp:
         ttk.Button(bf, text="Stop overlay", command=self.on_stop).grid(row=0, column=1, **pad)
         ttk.Button(bf, text="Quit", command=self.on_quit).grid(row=0, column=2, **pad)
 
+        # in-process poker session + correction panel (built once, shown while running)
+        self._sess = None
+        self._pollers = set()        # confirm-hotkey VKs already being polled
+        self.corr_mode = tk.StringVar(value="dropdown")
+        self._build_corrections(root, row=8)
+
         self.v["game"].trace_add("write", lambda *_: self._toggle())
+        self.corr_mode.trace_add("write", lambda *_: self._show_corr_mode())
         root.protocol("WM_DELETE_WINDOW", self.on_quit)   # X button closes overlays too
         self._toggle()
         self._refresh()
@@ -302,20 +309,26 @@ class LauncherApp:
 
     def on_launch(self):
         from tkinter import messagebox
-        if any(p.poll() is None for p in self.procs):    # one overlay at a time
-            self.status.configure(text="an overlay is already running - Stop it first",
-                                  foreground="#a00")
+        if self._sess is not None or any(p.poll() is None for p in self.procs):
+            self.status.configure(text="already running - Stop it first", foreground="#a00")
             return
         try:
-            argv = build_argv(self._options())
+            o = self._options()
         except ValueError:
             messagebox.showerror("Invalid", "Interval, confidence, positions and "
                                  "counts must be numbers.")
             return
-        proc = launch(argv)
-        self.procs.append(proc)
-        self.status.configure(text=f"overlay running (PID {proc.pid})", foreground="#070")
-        self._watch(proc)
+        if not (ROOT / o["config"]).exists():
+            self.status.configure(text="config not found - run calibration first",
+                                  foreground="#a00")
+            return
+        if o["game"] == "poker":
+            self._start_poker(o)        # in-process: overlay + corrections in the launcher
+        else:
+            proc = launch(build_argv(o))   # blackjack stays a separate process
+            self.procs.append(proc)
+            self.status.configure(text=f"overlay running (PID {proc.pid})", foreground="#070")
+            self._watch(proc)
 
     def _watch(self, proc):
         """Poll the launched overlay and update the status when it stops (closed,
@@ -339,6 +352,10 @@ class LauncherApp:
             pass
 
     def on_stop(self):
+        if self._sess is not None:                # in-process poker session
+            self._stop_session()
+            self.status.configure(text="overlay stopped", foreground="#070")
+            return
         live = [p for p in self.procs if p.poll() is None]
         if not live:
             self.status.configure(text="nothing running", foreground="#a00")
@@ -350,8 +367,218 @@ class LauncherApp:
     def on_quit(self):
         """Close the launcher and any overlays it started (don't leave them
         running headless)."""
+        self._stop_session()
         terminate_all(self.procs)
         self.root.destroy()
+
+    # ----------------------------------------------- in-process poker session --
+    def _start_poker(self, o):
+        from .live import (load_config, grab_frame, _screen_dimmed, _key_poller,
+                           _VK, PokerAdvisor)
+        from .overlay import SuggestionOverlay
+        from ..vision.hud import HudReader
+        from ..capture.screen import ScreenGrabber
+        try:
+            cfg = load_config(str(ROOT / o["config"]))
+            roi = cfg.get("poker")
+            if not roi:
+                raise RuntimeError("no 'poker' section in the config (calibrate first)")
+            reader = HudReader(str(ROOT / "data" / "poker_digits"),
+                               min_confidence=o["min_confidence"])
+        except Exception as e:                    # noqa: BLE001
+            self.status.configure(text=f"can't start: {e}", foreground="#a00")
+            return
+        card_reader = training = None
+        if o["detect"]:
+            try:
+                from ..vision.poker_cards import HoleCardReader
+                card_reader = HoleCardReader(str(ROOT / "data" / "poker_cards"))
+            except RuntimeError:
+                pass
+        if o["learn"]:
+            try:
+                from ..vision.poker_cards import TrainingWriter
+                training = TrainingWriter(str(ROOT / "data" / "poker_cards"))
+            except RuntimeError:
+                pass
+        advisor = PokerAdvisor(reader, roi, opp_fallback=o["opp"], iters=o["iters"],
+                               card_reader=card_reader, training=training)
+        grab = ScreenGrabber(monitor=cfg.get("monitor", 1))
+        grab.__enter__()
+        overlay = SuggestionOverlay(master=self.root, input_enabled=False,
+                                    x=o["x"], y=o["y"])
+        overlay.root.protocol("WM_DELETE_WINDOW", self.on_stop)   # X stops the session
+        self._sess = {"advisor": advisor, "grab": grab, "overlay": overlay, "cfg": cfg,
+                      "last": None, "interval": max(60, int(o["interval"] * 1000)),
+                      "running": True, "grab_frame": grab_frame, "dim": _screen_dimmed}
+        if os.name == "nt" and o["confirm_key"]:
+            vk = _VK.get(o["confirm_key"].lower())
+            if vk and vk not in self._pollers:       # one poller per key, reused across sessions
+                self._pollers.add(vk)
+                _key_poller(self.root, vk, self._confirm_hotkey)
+        self.cf2.grid(row=self._corr_row, column=0, sticky="ew", padx=8, pady=3)
+        self._show_corr_mode()
+        self.status.configure(text="overlay running (corrections below)", foreground="#070")
+        self._tick()
+
+    def _confirm_hotkey(self):
+        if self._sess:
+            self._sess["advisor"].confirm()
+
+    def _tick(self):
+        s = self._sess
+        if not s or not s["running"]:
+            return
+        frame = s["grab_frame"](s["grab"], s["cfg"])
+        if frame is None or frame.size == 0 or min(frame.shape[:2]) < 10:
+            text = "poker: 'Judgment' window not found - open it on the poker table"
+        elif s["dim"](frame):
+            text = "== PAUSED ==  (resume the game)" + (f"\n\n{s['last']}" if s["last"] else "")
+        else:
+            text = s["advisor"].text(frame)
+            s["last"] = text
+        s["overlay"].update_text(text)
+        self._refresh_corrections()
+        self.root.after(s["interval"], self._tick)
+
+    def _stop_session(self):
+        s = self._sess
+        if not s:
+            return
+        s["running"] = False
+        try:
+            s["grab"].__exit__(None, None, None)
+        except Exception:
+            pass
+        try:
+            s["overlay"].close()
+        except Exception:
+            pass
+        self.cf2.grid_remove()
+        self._sess = None
+
+    # ---------------------------------------------------- corrections panel ----
+    _SLOTS = [("H", 0), ("H", 1), ("B", 0), ("B", 1), ("B", 2), ("B", 3), ("B", 4)]
+    _RANKS = list("23456789TJQKA")
+    _SUITS = ["c", "d", "h", "s"]
+
+    def _slot_label(self, kind, idx):
+        return (f"Hole {idx + 1}" if kind == "H" else f"Board {idx + 1}")
+
+    def _build_corrections(self, root, row):
+        tk, ttk = self.tk, self.ttk
+        self._corr_row = row
+        self.cf2 = ttk.LabelFrame(root, text="Corrections - fix any wrong card (no typing)")
+        mt = ttk.Frame(self.cf2)
+        mt.grid(row=0, column=0, sticky="w", padx=8, pady=2)
+        ttk.Label(mt, text="Style:").grid(row=0, column=0)
+        ttk.Radiobutton(mt, text="Dropdowns", value="dropdown",
+                        variable=self.corr_mode).grid(row=0, column=1, padx=4)
+        ttk.Radiobutton(mt, text="Card grid", value="grid",
+                        variable=self.corr_mode).grid(row=0, column=2)
+
+        self.dd = ttk.Frame(self.cf2)        # dropdown style
+        self.grd = ttk.Frame(self.cf2)       # card-grid style
+        self._cells = []
+        for col, (kind, idx) in enumerate(self._SLOTS):
+            cell = ttk.Frame(self.dd)
+            cell.grid(row=0, column=col, padx=3, pady=2)
+            ttk.Label(cell, text=self._slot_label(kind, idx),
+                      font=("Segoe UI", 8)).grid(row=0, column=0, columnspan=2)
+            rv, sv = tk.StringVar(), tk.StringVar()
+            rc = ttk.Combobox(cell, values=self._RANKS, textvariable=rv, width=3, state="disabled")
+            sc = ttk.Combobox(cell, values=self._SUITS, textvariable=sv, width=3, state="disabled")
+            rc.grid(row=1, column=0)
+            sc.grid(row=1, column=1)
+            i = len(self._cells)
+            rc.bind("<<ComboboxSelected>>", lambda e, i=i: self._pick(i))
+            sc.bind("<<ComboboxSelected>>", lambda e, i=i: self._pick(i))
+            self._cells.append({"kind": kind, "idx": idx, "rank": rv, "suit": sv, "rc": rc, "sc": sc})
+
+        self._sel = 0                        # selected slot for the grid style
+        self._slotbtns = []
+        sb = ttk.Frame(self.grd)
+        sb.grid(row=0, column=0, sticky="w", pady=(2, 4))
+        for col, (kind, idx) in enumerate(self._SLOTS):
+            b = ttk.Button(sb, text="-", width=9, command=lambda i=col: self._grid_select(i))
+            b.grid(row=0, column=col, padx=2)
+            self._slotbtns.append(b)
+        rk = ttk.Frame(self.grd)
+        rk.grid(row=1, column=0, sticky="w")
+        ttk.Label(rk, text="rank:").grid(row=0, column=0)
+        for c, r in enumerate(self._RANKS):
+            ttk.Button(rk, text=r, width=2,
+                       command=lambda r=r: self._grid_set("rank", r)).grid(row=0, column=c + 1)
+        su = ttk.Frame(self.grd)
+        su.grid(row=2, column=0, sticky="w", pady=2)
+        ttk.Label(su, text="suit:").grid(row=0, column=0)
+        for c, s in enumerate(self._SUITS):
+            ttk.Button(su, text=s, width=2,
+                       command=lambda s=s: self._grid_set("suit", s)).grid(row=0, column=c + 1)
+        self._grid_hint = ttk.Label(self.grd, text="pick a slot, then a rank + suit",
+                                    foreground="#888", font=("Segoe UI", 8))
+        self._grid_hint.grid(row=3, column=0, sticky="w", pady=2)
+
+    def _show_corr_mode(self):
+        if self.corr_mode.get() == "grid":
+            self.dd.grid_remove()
+            self.grd.grid(row=1, column=0, sticky="w", padx=8, pady=4)
+        else:
+            self.grd.grid_remove()
+            self.dd.grid(row=1, column=0, sticky="w", padx=8, pady=4)
+
+    def _grid_select(self, i):
+        self._sel = i
+        kind, idx = self._SLOTS[i]
+        self._grid_hint.configure(text=f"editing {self._slot_label(kind, idx)} - pick a rank + suit")
+
+    def _grid_set(self, field, val):
+        self._cells[self._sel][field].set(val)
+        self._pick(self._sel)
+
+    def _pick(self, i):
+        """Apply a picked card: rebuild the slot's group (hole or board) from the
+        cells and push it to the advisor (which locks + banks it)."""
+        from ..cards import parse_card
+        if not self._sess:
+            return
+        group = self._cells[i]["kind"]
+        cards = []
+        for c in self._cells:
+            if c["kind"] == group and c["rank"].get() and c["suit"].get():
+                cards.append(parse_card(c["rank"].get() + c["suit"].get()))
+        adv = self._sess["advisor"]
+        if group == "H" and len(cards) == 2:
+            adv.set_hole(cards)
+        elif group == "B" and cards:
+            adv.set_board(cards)
+
+    def _refresh_corrections(self):
+        from ..cards import INT_TO_RANK, INT_TO_SUIT
+        s = self._sess
+        if not s:
+            return
+        adv = s["advisor"]
+        hole, board = list(adv.hole), list(adv.board)
+        for i, cell in enumerate(self._cells):
+            if cell["kind"] == "H":
+                card = hole[cell["idx"]] if cell["idx"] < len(hole) else None
+                fixed = adv.hole_locked
+            else:
+                card = board[cell["idx"]] if cell["idx"] < len(board) else None
+                fixed = cell["idx"] in adv._board_fixed
+            present = card is not None
+            cell["rc"].configure(state="readonly" if present else "disabled")
+            cell["sc"].configure(state="readonly" if present else "disabled")
+            if present and not fixed:        # reflect detection (don't fight a typed fix)
+                cell["rank"].set(INT_TO_RANK[card[0]])
+                cell["suit"].set(INT_TO_SUIT[card[1]])
+            elif not present:
+                cell["rank"].set("")
+                cell["suit"].set("")
+            lab = ("H" if cell["kind"] == "H" else "B") + str(cell["idx"] + 1)
+            txt = (INT_TO_RANK[card[0]] + INT_TO_SUIT[card[1]]) if present else "-"
+            self._slotbtns[i].configure(text=f"{lab}:{txt}")
 
 
 _MUTEX_NAME = "rgg-advisor-launcher"

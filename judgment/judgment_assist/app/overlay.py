@@ -15,12 +15,14 @@ from __future__ import annotations
 
 class SuggestionOverlay:
     def __init__(self, x=40, y=40, alpha=0.92, font_size=18,
-                 input_enabled=False, hint="", on_submit=None):
+                 input_enabled=False, hint="", on_submit=None, master=None):
         import tkinter as tk
         self._tk = tk
         self.on_submit = on_submit
         self.closed = False
-        self.root = tk.Tk()
+        # A child Toplevel when run inside another tk app (e.g. the launcher), else
+        # its own root for the standalone CLI.
+        self.root = tk.Toplevel(master) if master is not None else tk.Tk()
         # Title must NOT contain "judgment" — the capture layer finds the game
         # window by that substring and would otherwise grab this overlay instead.
         self.root.title("rgg-advisor")
