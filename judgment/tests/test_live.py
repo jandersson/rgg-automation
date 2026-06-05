@@ -105,6 +105,15 @@ def test_card_input_forwards_hole_and_board_to_target():
     assert cards_str(pa.board) == "Qh 7h 2h"
 
 
+def test_card_input_routes_bare_cards_by_count():
+    pa = PokerAdvisor(reader=None, cfg={})
+    ci = CardInput(pa, start=False)
+    ci.apply("Qh 7c 2d 8s")                   # 3-5 cards, no pipe -> board
+    assert cards_str(pa.board) == "Qh 7c 2d 8s" and pa.hole == []
+    ci.apply("3d 3c")                         # 2 cards -> hole, board untouched
+    assert cards_str(pa.hole) == "3d 3c" and cards_str(pa.board) == "Qh 7c 2d 8s"
+
+
 def test_card_input_append_and_board_only():
     pa = PokerAdvisor(reader=None, cfg={})
     ci = CardInput(pa, start=False)

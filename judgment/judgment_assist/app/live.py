@@ -253,16 +253,19 @@ class CardInput:
             self.target.clear()
         elif line.startswith("+"):                     # deal one more board card
             self.target.append_board(parse_cards(line[1:]))
-        elif "|" in line:                              # hole | board
+        elif "|" in line:                              # explicit  hole | board
             h, b = line.split("|", 1)
             board = parse_cards(b) if b.strip() else []
             hole = parse_cards(h) if h.strip() else None
             if hole is not None:
                 self.target.set_hole(hole)
             self.target.set_board(board)
-        else:                                          # hole only -> preflop
-            self.target.set_hole(parse_cards(line))
-            self.target.set_board([])
+        else:                                          # bare cards: route by count
+            cards = parse_cards(line)
+            if 3 <= len(cards) <= 5:                    # 3-5 cards can only be the board
+                self.target.set_board(cards)
+            else:                                       # 2 (or other) = your hole
+                self.target.set_hole(cards)
         return True
 
     def _loop(self):
@@ -738,9 +741,9 @@ def run(a):
     if not a.no_overlay:
         from .overlay import SuggestionOverlay
         hint = ("Hole + board are auto-detected (verify them). Advice updates live -\n"
-                "just play; click the game window to keep playing. To FIX a card click\n"
-                "the box: hole = As Kd, board = | Qh 7c 2d, one more = + Td, c = clear.\n"
-                "Enter (or your mapped controller button) banks the hand+board.  q = quit."
+                "just play; click the game window to keep playing. To FIX, click the box\n"
+                "and type cards: 2 = your hole (3d 3c), 3-5 = the board (Jc 2h 9d 8c),\n"
+                "+ Td adds one. Enter / your controller button banks it.  c clear, q quit."
                 ) if a.game == "poker" else ""
         overlay = SuggestionOverlay(x=a.x, y=a.y, input_enabled=(a.game == "poker"),
                                     hint=hint)
