@@ -160,8 +160,8 @@ class LauncherApp:
         # the overlay (one window: advice + the card-entry box)
         ov = ttk.LabelFrame(root, text="Overlay")
         ov.grid(row=1, column=0, sticky="ew", **pad)
-        self._help(ov, 0, "A floating box over the game shows the advice and (poker) "
-                          "takes your card entry - all in one window.")
+        self._help(ov, 0, "A floating box over the game shows the advice (display only). "
+                          "Poker card corrections happen here in the launcher, below.")
         ttk.Label(ov, text="Position:").grid(row=1, column=0, sticky="w", **pad)
         ttk.Entry(ov, textvariable=self.v["x"], width=5).grid(row=1, column=1, sticky="w")
         ttk.Label(ov, text="across,").grid(row=1, column=2, sticky="w")
