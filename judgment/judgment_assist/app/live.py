@@ -53,15 +53,28 @@ def load_config(path):
         return json.load(f)
 
 
+_GAME_NOT_FOUND = object()    # sentinel: a window is configured but isn't open
+
+
 def resolve_base(cfg):
-    """Return the capture base region dict, or None for the whole monitor."""
+    """Capture base region: a window rect, ``None`` for the whole monitor (when no
+    window is configured), or ``_GAME_NOT_FOUND`` when a window IS configured but
+    not open — so we never silently grab the desktop and read random UI as cards."""
     title = cfg.get("window")
-    if title:
-        reg = find_window_region(title)
-        if reg is None:
-            return None  # window not found right now; fall back to monitor
-        return reg
-    return None
+    if not title:
+        return None                       # no window configured -> whole monitor
+    reg = find_window_region(title)
+    return reg if reg is not None else _GAME_NOT_FOUND
+
+
+def grab_frame(g, cfg):
+    """Grab the game frame, or ``None`` if the configured game window isn't open
+    (instead of falling back to the whole monitor — that fallback is what let it
+    read the desktop/Steam UI and bank garbage)."""
+    base = resolve_base(cfg)
+    if base is _GAME_NOT_FOUND:
+        return None
+    return g.grab(base)
 
 
 def _insurance(dealer, true_count):
@@ -671,7 +684,9 @@ def run(a):
         # The game window collapses to 0x0 when minimized/not foreground; mss then
         # returns an empty frame. Don't read it — wait.
         if frame is None or frame.size == 0 or min(frame.shape[:2]) < 10:
-            return f"{a.game}: game window not visible (focus Judgment)..."
+            win = cfg.get("window")
+            return (f"{a.game}: '{win}' window not found - open it on the table"
+                    if win else f"{a.game}: game window not visible...")
         # Judgment dims the whole screen when paused / not focused (including while
         # you click the overlay to type). Show PAUSED and hold the last advice
         # rather than reading garbage off the dimmed frame.
@@ -757,7 +772,7 @@ def run(a):
                 def tick():
                     if overlay.closed:
                         return
-                    overlay.update_text(step(g.grab(resolve_base(cfg))))
+                    overlay.update_text(step(grab_frame(g, cfg)))
                     overlay.root.after(interval_ms, tick)
 
                 overlay.root.after(0, tick)
@@ -767,7 +782,7 @@ def run(a):
                 if a.game == "poker":
                     cards_in.start_thread()
                 while not (cards_in is not None and cards_in.stop):
-                    print("\n" + step(g.grab(resolve_base(cfg))))
+                    print("\n" + step(grab_frame(g, cfg)))
                     time.sleep(a.interval)
     except KeyboardInterrupt:
         print("\nstopped.")

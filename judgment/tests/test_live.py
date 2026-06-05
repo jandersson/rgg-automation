@@ -201,6 +201,16 @@ def test_poker_advisor_street_follows_screen_and_prompts_for_board():
     assert "(flop)" in txt2 and ">>>" in txt2 and "type the board" not in txt2
 
 
+def test_grab_frame_none_when_game_window_missing():
+    import os
+    from judgment_assist.app.live import resolve_base, grab_frame, _GAME_NOT_FOUND
+    assert resolve_base({}) is None                       # no window -> whole monitor
+    if os.name != "nt":
+        pytest.skip("window lookup is Windows-only")
+    assert resolve_base({"window": "NoSuchWindow_zzz"}) is _GAME_NOT_FOUND
+    assert grab_frame(None, {"window": "NoSuchWindow_zzz"}) is None   # never grabs the desktop
+
+
 def test_overlay_single_instance_lock():
     import os
     if os.name != "nt":
