@@ -33,7 +33,7 @@ DEFAULTS = {
     # poker
     "detect": True,         # False -> --no-detect
     "learn": True,          # False -> --no-learn
-    "confirm_key": "f13",   # global confirm hotkey (controller back button)
+    "confirm_key": "insert",   # global confirm hotkey (controller back button)
     "opp": 3,               # Judgment poker is 4-handed (you + 3)
     "iters": 12000,
     # blackjack

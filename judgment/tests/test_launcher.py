@@ -53,7 +53,7 @@ def test_poker_no_detect_and_console_only():
 
 def test_poker_passes_confirm_key():
     argv = build_argv(_opts(game="poker"))
-    assert argv[argv.index("--confirm-key") + 1] == "f13"     # default
+    assert argv[argv.index("--confirm-key") + 1] == "insert"  # default
     argv2 = build_argv(_opts(game="poker", confirm_key="home"))
     assert argv2[argv2.index("--confirm-key") + 1] == "home"
     assert "--confirm-key" not in build_argv(_opts(game="blackjack"))  # poker-only

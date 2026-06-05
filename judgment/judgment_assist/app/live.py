@@ -769,10 +769,10 @@ def main(argv=None):
                    help="disable hole-card auto-detection (type all cards manually)")
     p.add_argument("--no-learn", dest="learn", action="store_false",
                    help="don't save confirmed/corrected cards as new training data")
-    p.add_argument("--confirm-key", dest="confirm_key", default="f13",
+    p.add_argument("--confirm-key", dest="confirm_key", default="insert",
                    help="global key that confirms the hand, same as Enter (map a "
-                        "Steam controller back button to it). f13-f24 / home / end / "
-                        "insert / delete / pageup / pagedown / pause; '' to disable")
+                        "Steam controller back button to it). insert / home / end / "
+                        "delete / pageup / pagedown / pause / f13-f24; '' to disable")
     p.add_argument("--interval", type=float, default=0.7, help="seconds between reads")
     p.add_argument("--min-confidence", dest="min_confidence", type=float, default=0.6)
     p.add_argument("--no-overlay", action="store_true", help="print to console instead")
