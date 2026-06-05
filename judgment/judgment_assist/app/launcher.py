@@ -34,7 +34,7 @@ DEFAULTS = {
     # poker
     "detect": True,         # False -> --no-detect
     "learn": True,          # False -> --no-learn
-    "opp": 2,
+    "opp": 3,               # Judgment poker is 4-handed (you + 3)
     "iters": 12000,
     # blackjack
     "decks": 6,

@@ -38,7 +38,7 @@ def _opts(**over):
 def test_poker_defaults_emit_detection_on():
     argv = build_argv(_opts(game="poker"))
     assert argv[0] == "poker"
-    assert "--opp" in argv and "2" in argv and "--iters" in argv
+    assert argv[argv.index("--opp") + 1] == "3" and "--iters" in argv   # 4-handed default
     assert "--no-detect" not in argv          # detect on by default
     assert "--no-overlay" not in argv         # overlay on by default
     # no blackjack-only flags leak in

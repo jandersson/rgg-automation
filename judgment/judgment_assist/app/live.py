@@ -652,7 +652,9 @@ def main(argv=None):
     p.add_argument("--save-misses", dest="save_misses", default=None,
                    help="dir to dump frames where the card read disagrees with the HUD total")
     # poker
-    p.add_argument("--opp", type=int, default=2)
+    p.add_argument("--opp", type=int, default=3,
+                   help="opponents to assume for equity when the active count can't "
+                        "be read (Judgment poker is 4-handed: you + 3)")
     p.add_argument("--iters", type=int, default=12000)
     run(p.parse_args(argv))
 
