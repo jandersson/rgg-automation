@@ -422,8 +422,20 @@ class LauncherApp:
         self._tick()
 
     def _confirm_hotkey(self):
-        if self._sess:
-            self._sess["advisor"].confirm()
+        from ..cards import cards_str
+        if not self._sess:
+            self.status.configure(text="confirm: no overlay running - Launch first",
+                                  foreground="#a00")
+            return
+        adv = self._sess["advisor"]
+        adv.confirm()
+        if len(adv.hole) == 2:
+            msg = f"confirmed {cards_str(adv.hole)}"
+            if adv.board:
+                msg += " | " + cards_str(adv.board)
+            self.status.configure(text=msg + "  (banked for training)", foreground="#070")
+        else:
+            self.status.configure(text="confirm: no hand detected yet", foreground="#a00")
 
     def _tick(self):
         s = self._sess
