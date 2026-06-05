@@ -1,5 +1,5 @@
 """The launcher's flag -> argv mapping (pure; no tkinter / display needed)."""
-from judgment_assist.app.launcher import build_argv, DEFAULTS, terminate_all
+from judgment_assist.app.launcher import build_argv, DEFAULTS, terminate_all, summarize
 
 
 class _FakeProc:
@@ -18,6 +18,15 @@ def test_terminate_all_kills_running_only():
     running, done = _FakeProc(True), _FakeProc(False)
     assert terminate_all([running, done]) == 1     # only the live one
     assert running.killed and not done.killed
+
+
+def test_summarize_is_plain_english():
+    poker = summarize(_opts(game="poker", detect=True, learn=False, opp=3))
+    assert "Poker advisor" in poker and "auto-detect hole cards ON" in poker
+    assert "learn from corrections OFF" in poker and "3 opponents" in poker
+    bj = summarize(_opts(game="blackjack", count=True, overlay=False))
+    assert "Blackjack advisor" in bj and "counting ON" in bj
+    assert "console only" in bj.lower()
 
 
 def _opts(**over):

@@ -84,6 +84,22 @@ def launch(argv):
     return subprocess.Popen(cmd, **kwargs)
 
 
+def summarize(o):
+    """Plain-English description of what Launch will do (for the GUI preview)."""
+    g = o["game"]
+    if g == "poker":
+        bits = ["auto-detect hole cards " + ("ON" if o["detect"] else "OFF"),
+                "learn from corrections " + ("ON" if o["learn"] else "OFF"),
+                f"assume {o['opp']} opponents when unsure"]
+    else:
+        bits = [f"{o['decks']}-deck shoe",
+                "Hi-Lo counting " + ("ON" if o["count"] else "OFF"),
+                "session logging " + ("ON" if o["db"] else "OFF")]
+    where = "print to console only" if not o["overlay"] else f"floating overlay at ({o['x']}, {o['y']})"
+    return (f"{g.capitalize()} advisor: " + ", ".join(bits) + ".\n"
+            f"{where.capitalize()}, re-reading the screen every {o['interval']}s.")
+
+
 def terminate_all(procs):
     """Terminate any still-running spawned overlays. Returns how many were killed."""
     n = 0
@@ -168,7 +184,7 @@ class LauncherApp:
         ttk.Entry(self.bf, textvariable=self.v["log"], width=28).grid(row=3, column=1, columnspan=3, sticky="ew", **pad)
 
         # command preview + status
-        self.preview = tk.Text(root, height=3, width=52, wrap="word",
+        self.preview = tk.Text(root, height=5, width=52, wrap="word",
                                bg="#101010", fg="#39ff14", font=("Consolas", 9))
         self.preview.grid(row=4, column=0, sticky="ew", **pad)
         self.preview.configure(state="disabled")
@@ -222,15 +238,16 @@ class LauncherApp:
     def _refresh(self, *_):
         """Update the command preview + a calibration/path warning."""
         try:
-            argv = build_argv(self._options())
-            cmd = "python -m judgment_assist.app.live " + " ".join(argv)
-            warn = "" if (ROOT / self._options()["config"]).exists() else \
-                "config not found — run calibration (mark) first"
+            o = self._options()
+            text = (summarize(o) + "\n\nruns:  python -m judgment_assist.app.live "
+                    + " ".join(build_argv(o)))
+            warn = "" if (ROOT / o["config"]).exists() else \
+                "config not found - run calibration (mark) first"
         except ValueError:
-            cmd, warn = "(enter valid numbers)", ""
+            text, warn = "(enter valid numbers above)", ""
         self.preview.configure(state="normal")
         self.preview.delete("1.0", "end")
-        self.preview.insert("1.0", cmd)
+        self.preview.insert("1.0", text)
         self.preview.configure(state="disabled")
         self.status.configure(text=warn)
 
