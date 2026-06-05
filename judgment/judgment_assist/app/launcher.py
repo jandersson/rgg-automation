@@ -84,6 +84,19 @@ def launch(argv):
     return subprocess.Popen(cmd, **kwargs)
 
 
+def terminate_all(procs):
+    """Terminate any still-running spawned overlays. Returns how many were killed."""
+    n = 0
+    for p in procs:
+        if p.poll() is None:
+            try:
+                p.terminate()
+                n += 1
+            except Exception:
+                pass
+    return n
+
+
 # --------------------------------------------------------------------- GUI ---
 class LauncherApp:
     def __init__(self, root):
@@ -166,9 +179,10 @@ class LauncherApp:
         bf.grid(row=6, column=0, sticky="ew", **pad)
         ttk.Button(bf, text="Launch overlay", command=self.on_launch).grid(row=0, column=0, **pad)
         ttk.Button(bf, text="Stop last", command=self.on_stop).grid(row=0, column=1, **pad)
-        ttk.Button(bf, text="Quit", command=root.destroy).grid(row=0, column=2, **pad)
+        ttk.Button(bf, text="Quit", command=self.on_quit).grid(row=0, column=2, **pad)
 
         self.v["game"].trace_add("write", lambda *_: self._toggle())
+        root.protocol("WM_DELETE_WINDOW", self.on_quit)   # X button closes overlays too
         self._toggle()
         self._refresh()
 
@@ -241,6 +255,12 @@ class LauncherApp:
         p = live[-1]
         p.terminate()
         self.status.configure(text=f"stopped PID {p.pid}", foreground="#070")
+
+    def on_quit(self):
+        """Close the launcher and any overlays it started (don't leave them
+        running headless)."""
+        terminate_all(self.procs)
+        self.root.destroy()
 
 
 def main():

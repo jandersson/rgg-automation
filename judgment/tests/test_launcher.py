@@ -1,5 +1,23 @@
 """The launcher's flag -> argv mapping (pure; no tkinter / display needed)."""
-from judgment_assist.app.launcher import build_argv, DEFAULTS
+from judgment_assist.app.launcher import build_argv, DEFAULTS, terminate_all
+
+
+class _FakeProc:
+    def __init__(self, running=True):
+        self._running, self.killed = running, False
+
+    def poll(self):
+        return None if self._running else 0
+
+    def terminate(self):
+        self.killed = True
+        self._running = False
+
+
+def test_terminate_all_kills_running_only():
+    running, done = _FakeProc(True), _FakeProc(False)
+    assert terminate_all([running, done]) == 1     # only the live one
+    assert running.killed and not done.killed
 
 
 def _opts(**over):
