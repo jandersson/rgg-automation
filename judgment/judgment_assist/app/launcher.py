@@ -179,9 +179,10 @@ class LauncherApp:
         ttk.Label(self.pf, text="Opponents at the table").grid(row=4, column=0, sticky="w", **pad)
         ttk.Entry(self.pf, textvariable=self.v["opp"], width=5).grid(row=4, column=1, sticky="w")
         self._help(self.pf, 5, "Fallback only - used when it can't count the active players itself.")
-        ttk.Label(self.pf, text="Odds calc accuracy").grid(row=6, column=0, sticky="w", **pad)
+        ttk.Label(self.pf, text="Odds simulation runs").grid(row=6, column=0, sticky="w", **pad)
         ttk.Entry(self.pf, textvariable=self.v["iters"], width=8).grid(row=6, column=1, sticky="w")
-        self._help(self.pf, 7, "Higher = steadier odds, a little slower (default 12000).")
+        self._help(self.pf, 7, "Random deals run to estimate your win % - more = steadier odds, "
+                               "a bit slower (default 12000).")
 
         # blackjack options
         self.bf = ttk.LabelFrame(root, text="Blackjack options")
