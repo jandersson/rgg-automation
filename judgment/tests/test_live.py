@@ -319,13 +319,23 @@ def test_poker_advisor_autodetects_hole_then_locks_on_override():
     assert cards_str(pa.hole) == "Ah Kh" and pa.hole_locked
 
 
-def test_poker_advisor_captures_correction_as_training():
+def test_bank_card_saves_only_that_card():
     w = _RecWriter()
     pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
                       _poker_cfg(), iters=2000, training=w)
-    pa.text(_frame(0))             # both hole slots face-up, frame cached
-    pa.set_hole(parse_cards("Ah Kd"))        # correction -> saved with your labels
-    assert w.saved == [("Ah", "H0"), ("Kd", "H1")]
+    pa.text(_frame(3))                        # board present, frame cached
+    pa.bank_card("B", 2, parse_cards("2d")[0])   # correct ONE board card
+    assert w.saved == [("2d", "B2")]         # only that card, not the whole board
+
+
+def test_set_hole_set_board_do_not_autobank():
+    w = _RecWriter()
+    pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
+                      _poker_cfg(), iters=2000, training=w)
+    pa.text(_frame(3))
+    pa.set_hole(parse_cards("Ah Kd"))        # state only - must NOT bank
+    pa.set_board(parse_cards("Qh 7h 2h"))
+    assert w.saved == []                     # nothing banked without an explicit correct/confirm
 
 
 def test_poker_advisor_confirm_saves_detected_hand():
@@ -349,15 +359,6 @@ def test_confirm_banks_detected_board_too():
     pa.confirm()                              # Enter banks BOTH hole and board
     slots = [slot for _, slot in w.saved]
     assert slots == ["H0", "H1", "B0", "B1", "B2"]
-
-
-def test_poker_advisor_captures_typed_board():
-    w = _RecWriter()
-    pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
-                      _poker_cfg(), iters=2000, training=w)
-    pa.text(_frame(3))
-    pa.set_board(parse_cards("Qh 7h 2h"))    # typed board cards are labels too
-    assert [slot for _, slot in w.saved] == ["B0", "B1", "B2"]
 
 
 def test_poker_advisor_no_capture_when_learning_off():

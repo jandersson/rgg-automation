@@ -597,23 +597,29 @@ class LauncherApp:
         self._pick(self._sel)
 
     def _pick(self, i):
-        """Apply a picked card: rebuild the slot's group (hole or board) from the
-        cells and push it to the advisor (which locks + banks it)."""
+        """Apply ONE picked card: update the hand state (full group, for equity) but
+        bank only the single card the hero changed — not the rest of the hand."""
         from ..cards import parse_card, cards_str
         if not self._sess:
             return
-        group = self._cells[i]["kind"]
-        cards = []
-        for c in self._cells:
-            if c["kind"] == group and c["rank"].get() and c["suit"].get():
-                cards.append(parse_card(c["rank"].get() + c["suit"].get()))
+        cell = self._cells[i]
+        kind, idx = cell["kind"], cell["idx"]
+        if not (cell["rank"].get() and cell["suit"].get()):
+            return
+        changed = parse_card(cell["rank"].get() + cell["suit"].get())
+        group = [parse_card(c["rank"].get() + c["suit"].get()) for c in self._cells
+                 if c["kind"] == kind and c["rank"].get() and c["suit"].get()]
         adv = self._sess["advisor"]
-        if group == "H" and len(cards) == 2:
-            adv.set_hole(cards)
-            self.status.configure(text=f"set hole to {cards_str(cards)}", foreground="#070")
-        elif group == "B" and cards:
-            adv.set_board(cards)
-            self.status.configure(text=f"set board to {cards_str(cards)}", foreground="#070")
+        if kind == "H" and len(group) == 2:
+            adv.set_hole(group)
+        elif kind == "B" and group:
+            adv.set_board(group)
+        else:
+            return
+        adv.bank_card(kind, idx, changed)        # bank ONLY the card you changed
+        where = "hole" if kind == "H" else "board"
+        self.status.configure(text=f"corrected {where} card {idx + 1} to "
+                              f"{cards_str([changed])}", foreground="#070")
 
     def _refresh_corrections(self):
         from ..cards import INT_TO_RANK, INT_TO_SUIT

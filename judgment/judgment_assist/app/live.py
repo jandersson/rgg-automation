@@ -307,24 +307,25 @@ class PokerAdvisor:
         self._good_frame = None           # last LIVE (cards-present) frame, for capture
         self._key = self._eq = None
 
-    # -- hero input (called from the CardInput thread) ------------------------
+    # -- hero input ----------------------------------------------------------
+    # NOTE: set_hole/set_board only update the hand STATE (for equity/display) and
+    # lock it; they do NOT bank training data. Banking is explicit: bank_card() for
+    # a single corrected card, or confirm() for the whole verified hand. This stops
+    # a one-card fix from re-saving the other (possibly mis-detected) cards.
     def set_hole(self, cards):
         with self._lock:
             self.hole, self.hole_locked, self._info = list(cards), True, None
-        self._capture(self.cfg.get("hole", []), cards, "H")   # corrected/confirmed
 
     def set_board(self, cards):
         with self._lock:
             self.board = list(cards)
             self._board_fixed = set(range(len(cards)))   # typed -> don't auto-overwrite
-        self._capture(self.cfg.get("board", []), cards, "B")
 
     def append_board(self, cards):
         with self._lock:
             start = len(self.board)
             self.board = self.board + list(cards)
             self._board_fixed |= set(range(start, len(self.board)))
-        self._capture(self.cfg.get("board", []), self.board, "B")
 
     def confirm(self):
         """Bare-Enter: accept everything currently shown (hole + board) as correct
@@ -350,38 +351,50 @@ class PokerAdvisor:
             self._locked_screen = None
 
     # -- training capture ----------------------------------------------------
-    def _capture(self, anchors, cards, prefix):
-        """Save each face-up card's WHOLE-card crop with its (now-known) label as a
-        new exemplar, and hot-add it to the live reader. Captures from the last
-        LIVE frame (cards present) — NOT the current one, which may be the
-        dimmed/paused screen if you tabbed to the console to type. No-op when
-        learning is off."""
+    def _bank_one(self, kind, idx, card):
+        """Save ONE card's whole-card crop with its label and hot-add it to the
+        reader. Crop comes from the last LIVE (cards-present) frame, not the current
+        (maybe paused) one. Returns the card string if a new crop was written."""
         if self.training is None:
-            return
+            return None
         from ..vision.poker import card_present
         from ..vision.poker_cards import whole_roi
+        anchors = self.cfg.get("hole" if kind == "H" else "board", [])
+        if idx >= len(anchors):
+            return None
         with self._lock:
             frame = self._good_frame
         if frame is None:
-            return
+            return None
         cw, ch = self.cfg["corner"]
-        saved = []
-        for i, card in enumerate(cards):
-            if i >= len(anchors):
-                break
-            x, y = anchors[i]
-            corner = frame[y:y + ch, x:x + cw]
-            if corner.shape[:2] != (ch, cw) or not card_present(corner):
-                continue
-            l, t, w, h = whole_roi((x, y), f"{prefix}{i}")
-            whole = frame[t:t + h, l:l + w]
-            if whole.shape[:2] != (h, w):
-                continue
-            rank, suit = card
-            if self.training.save(whole, rank, suit, f"{prefix}{i}"):
-                if self.card_reader is not None:
-                    self.card_reader.add_exemplar(whole, rank, suit)
-                saved.append(card_str(card))
+        x, y = anchors[idx]
+        corner = frame[y:y + ch, x:x + cw]
+        if corner.shape[:2] != (ch, cw) or not card_present(corner):
+            return None
+        l, t, w, h = whole_roi((x, y), f"{kind}{idx}")
+        whole = frame[t:t + h, l:l + w]
+        if whole.shape[:2] != (h, w):
+            return None
+        rank, suit = card
+        if self.training.save(whole, rank, suit, f"{kind}{idx}"):
+            if self.card_reader is not None:
+                self.card_reader.add_exemplar(whole, rank, suit)
+            return card_str(card)
+        return None
+
+    def bank_card(self, kind, idx, card):
+        """Bank a single corrected card (kind 'H'/'B', slot idx). The one the hero
+        actually changed — not the rest of the hand."""
+        saved = self._bank_one(kind, idx, card)
+        if saved:
+            where = "hole" if kind == "H" else "board"
+            print(f"  learned {where} card {idx + 1}: {saved} (new training example)")
+        return saved
+
+    def _capture(self, anchors, cards, prefix):
+        """Bank a whole group (used by confirm — the hero says it's ALL correct)."""
+        saved = [s for i, card in enumerate(cards)
+                 for s in [self._bank_one(prefix, i, card)] if s]
         if saved:
             where = "hole" if prefix == "H" else "board"
             print(f"  learned {where} {' '.join(saved)}  "
