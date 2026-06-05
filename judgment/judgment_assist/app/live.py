@@ -592,8 +592,11 @@ def run(a):
     overlay = None
     if not a.no_overlay:
         from .overlay import SuggestionOverlay
-        hint = ("[Enter] confirm   fix hole: type e.g. As Kd   |Qh 7c 2d board   "
-                "+Td deal   c clear   Esc quit") if a.game == "poker" else ""
+        hint = ("Advice updates live - just play. To FIX a card: click the box below,\n"
+                "type it (e.g. As Kd), Enter.  Click the game window to keep playing.\n"
+                "Enter on a correct hand banks it for training.  | Qh 7c 2d = board   "
+                "+ Td = deal   c = clear.  Close this window (or type q) to stop."
+                ) if a.game == "poker" else ""
         overlay = SuggestionOverlay(x=a.x, y=a.y, input_enabled=(a.game == "poker"),
                                     hint=hint)
         if a.game == "poker":
