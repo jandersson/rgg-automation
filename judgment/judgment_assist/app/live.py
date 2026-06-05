@@ -523,10 +523,17 @@ def run(a):
         poker = PokerAdvisor(reader, roi_cfg, opp_fallback=a.opp, iters=a.iters,
                              card_reader=card_reader, training=training)
         cards_in = CardInput(poker)
-        mode = "auto-detects your hole cards; correct any wrong" if card_reader \
-            else "type your cards"
-        print(f"semi-auto poker - {mode} as the hand develops:")
-        print("  Enter  confirm hand   Ah Kh  fix hole   | Qh 7h 2h  board   + Td  deal   c  clear   q  quit")
+        if card_reader:
+            print("semi-auto poker: the overlay shows the cards it DETECTS in your hand;")
+            print("you confirm or correct them. Type commands in THIS window:")
+        else:
+            print("semi-auto poker: type your cards in THIS window as the hand develops:")
+        print("    (cards are rank+suit, e.g. As = ace of spades, Th = ten of hearts)")
+        print("    Enter        confirm the detected hand is correct")
+        print("    <two cards>  set/fix your hole cards     example:  As Kd")
+        print("    | <cards>    set the board               example:  | Qh 7c 2d")
+        print("    + <card>     add one board card          example:  + Td")
+        print("    c            clear the hand              q   quit")
 
     overlay = None
     if not a.no_overlay:
