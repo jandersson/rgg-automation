@@ -178,7 +178,7 @@ class LauncherApp:
         bf = ttk.Frame(root)
         bf.grid(row=6, column=0, sticky="ew", **pad)
         ttk.Button(bf, text="Launch overlay", command=self.on_launch).grid(row=0, column=0, **pad)
-        ttk.Button(bf, text="Stop last", command=self.on_stop).grid(row=0, column=1, **pad)
+        ttk.Button(bf, text="Stop overlay", command=self.on_stop).grid(row=0, column=1, **pad)
         ttk.Button(bf, text="Quit", command=self.on_quit).grid(row=0, column=2, **pad)
 
         self.v["game"].trace_add("write", lambda *_: self._toggle())
