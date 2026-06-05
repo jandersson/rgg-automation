@@ -157,6 +157,23 @@ class LabelSession:
     def prev(self):
         return self.goto(self.i - 1)
 
+    def next_incomplete(self):
+        """Jump to the next still-unlabeled item (wrapping); stay put if all done.
+        Makes resuming a part-labeled task painless."""
+        n = len(self.items)
+        for off in range(1, n + 1):
+            j = (self.i + off) % n
+            if not self.is_complete(self.items[j]["id"]):
+                return self.goto(j)
+        return self.i
+
+    def first_incomplete(self):
+        """Go to the first unlabeled item (or item 0 if all are done)."""
+        for j in range(len(self.items)):
+            if not self.is_complete(self.items[j]["id"]):
+                return self.goto(j)
+        return self.goto(0)
+
     # --- io / status ------------------------------------------------------
     def progress(self):
         done = sum(1 for it in self.items if self.is_complete(it["id"]))

@@ -89,6 +89,19 @@ def test_pred_for_scalar_and_dict(tmp_path):
     assert s.pred_for("rank") == "4" and s.pred_for("color") == "red"
 
 
+def test_next_and_first_incomplete_skip_labeled(tmp_path):
+    s = LabelSession(images_task(["a.png", "b.png", "c.png", "d.png"], ["X", "Y"],
+                                 "?", str(tmp_path / "o.json")))
+    s.record("X")            # a done
+    s.next(); s.record("Y")  # b done; now at b (i=1)
+    assert s.first_incomplete() == 2          # a,b labeled -> first open is c
+    assert s.current_id() == "c.png"
+    s.record("X")            # c done
+    assert s.next_incomplete() == 3           # -> d (only one left)
+    s.record("X")            # all done
+    assert s.next_incomplete() == 3           # nothing open -> stay put
+
+
 def test_accept_predictions_keeps_corrections(tmp_path):
     task = images_task(["x.png"], None, "?", str(tmp_path / "a.json"),
                        fields=[{"name": "rank", "labels": ["3", "9"]},

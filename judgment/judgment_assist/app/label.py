@@ -86,7 +86,7 @@ class LabelerGUI:
         self.info.pack(fill="x", padx=8, pady=(4, 0))
         tk.Label(self.root, bg="#101010", fg="#9aa", font=("Consolas", 9),
                  text="click a label or 1-9   Enter=accept pred   s=skip   "
-                      "Backspace=clear   <- -> nav   q=save&quit").pack(fill="x", padx=8, pady=(0, 8))
+                      "Backspace=clear   <- -> nav   n=next unlabeled   q=save&quit").pack(fill="x", padx=8, pady=(0, 8))
 
         self.root.bind("<Return>", lambda e: self._accept_pred())
         self.root.bind("s", lambda e: (self.s.skip(), self.s.save(), self._advance()))
@@ -96,7 +96,9 @@ class LabelerGUI:
         self.root.bind("q", lambda e: self._quit())
         for n in range(9):
             self.root.bind(str(n + 1), lambda e, k=n: self._numkey(k))
+        self.root.bind("n", lambda e: (self.s.next_incomplete(), self._show()))
 
+        self.s.first_incomplete()   # resume at the first unlabeled item
         self._show()
         self.root.update_idletasks()
         self.root.lift()
@@ -127,8 +129,7 @@ class LabelerGUI:
             self._show()
 
     def _advance(self):
-        if self.s.i < len(self.s.items) - 1:
-            self.s.next()
+        self.s.next_incomplete()   # skip past already-labeled items
         self._show()
 
     def _show(self):
