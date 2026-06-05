@@ -157,7 +157,7 @@ class LauncherApp:
         cf.grid(row=1, column=0, sticky="ew", **pad)
         ttk.Checkbutton(cf, text="Show overlay (uncheck = console only)",
                         variable=self.v["overlay"]).grid(row=0, column=0, columnspan=4, sticky="w", **pad)
-        self._row(cf, 1, "Overlay X", "x", 6, "Y", "y", 6)
+        self._row(cf, 1, "Overlay X (from left)", "x", 6, "Y (from top)", "y", 6)
         self._row(cf, 2, "Interval (s)", "interval", 6, "Min confidence", "min_confidence", 6)
         ttk.Label(cf, text="Config").grid(row=3, column=0, sticky="w", **pad)
         ttk.Entry(cf, textvariable=self.v["config"], width=34).grid(row=3, column=1, columnspan=3, sticky="ew", **pad)
