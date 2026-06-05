@@ -210,6 +210,9 @@ class _FakeCardReader:
     def __init__(self, pair):
         self.pair, self.i, self.added = pair, 0, []
 
+    def set_pair(self, pair):
+        self.pair = pair                     # simulate the screen showing new cards
+
     def recognize(self, corner_bgr):
         r = self.pair[self.i % 2]
         self.i += 1
@@ -285,18 +288,36 @@ def test_poker_advisor_no_capture_when_learning_off():
     assert cards_str(pa.hole) == "Ah Kd"
 
 
+def _det(c0, c1):
+    return ((parse_cards(c0)[0], {"color": "black"}), (parse_cards(c1)[0], {"color": "red"}))
+
+
+def test_correction_survives_pause_resume_same_hand():
+    # the reported bug: type a fix, pause (cards read as absent), resume -> the
+    # SAME cards reappear, which must NOT wipe the correction.
+    cr = _FakeCardReader(_det("4s", "9h"))
+    pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
+                      _poker_cfg(), iters=2000, card_reader=cr)
+    f = _felt_with_board(2)
+    pa.text(f); pa.text(f)                    # detect 4s 9h, baseline = 4s 9h
+    pa.set_hole(parse_cards("8c 2d"))         # hero corrects -> locked
+    pa.text(_felt_with_board(0))              # pause: hole reads as absent
+    pa.text(f); pa.text(f); pa.text(f)        # resume: same 4s 9h on screen
+    assert pa.hole_locked and cards_str(pa.hole) == "8c 2d"   # correction kept
+
+
 def test_poker_advisor_redetects_after_new_deal():
-    reader = _FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0})
-    pa = PokerAdvisor(reader, _poker_cfg(), iters=2000,
-                      card_reader=_FakeCardReader(((parse_cards("7c")[0], {"color": "black"}),
-                                                   (parse_cards("2d")[0], {"color": "red"}))))
-    pa.set_hole(parse_cards("Ah Kh"))        # locked from a previous hand
-    empty = _felt_with_board(0)              # hole slots empty (between hands)
-    pa.text(empty)
-    assert pa.hole_locked                    # still locked until a card appears...
-    f = _felt_with_board(2)                  # new deal: slots go empty -> up
-    pa.text(f); pa.text(f)
-    assert not pa.hole_locked and cards_str(pa.hole) == "7c 2d"   # re-detected
+    cr = _FakeCardReader(_det("7c", "2d"))
+    pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
+                      _poker_cfg(), iters=2000, card_reader=cr)
+    f = _felt_with_board(2)
+    pa.text(f); pa.text(f)                    # detect 7c 2d, baseline = 7c 2d
+    pa.set_hole(parse_cards("Ah Kh"))         # correction -> locked
+    pa.text(f)
+    assert pa.hole_locked and cards_str(pa.hole) == "Ah Kh"   # same hand -> kept
+    cr.set_pair(_det("As", "Kd"))             # a genuinely NEW hand is dealt
+    pa.text(f); pa.text(f); pa.text(f)        # 3 stable frames of the new read
+    assert not pa.hole_locked and cards_str(pa.hole) == "As Kd"   # re-detected
 
 
 def test_log_hand_writes_a_csv_row(tmp_path):

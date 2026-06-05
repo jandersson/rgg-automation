@@ -284,7 +284,7 @@ class PokerAdvisor:
         self._lock = threading.Lock()
         self.hole, self.board, self.hole_locked = [], [], False
         self._info = None                 # per-hole detection info (colour, conf)
-        self._present_last = False        # were both hole slots up last frame?
+        self._locked_screen = None        # what the screen read when the hand was set
         self._cand, self._cand_n = None, 0   # stability filter for detection
         self._good_frame = None           # last LIVE (cards-present) frame, for capture
         self._key = self._eq = None
@@ -372,28 +372,36 @@ class PokerAdvisor:
         return True
 
     def _detect(self, frame, present):
-        """Update the hole cards from the screen unless the hero has typed them.
-        Reads the WHOLE card (better than the corner); re-detects at each new deal
-        (hole slots empty -> up); a 2-frame stability filter avoids a half-deal."""
+        """Keep the hole cards in sync with the screen. Reads the WHOLE card every
+        frame (better than the corner) so it can tell a genuinely NEW hand — the
+        PHYSICAL cards on screen changed — from a mere pause/resume, where the same
+        cards reappear. The latter must NOT wipe a correction you typed: pausing
+        dims the screen so the cards read as 'absent', and the old logic mistook the
+        resume for a new deal."""
+        if not present:
+            return
         from ..vision.poker_cards import whole_roi
-        if present and not self._present_last:        # a new hand was dealt
-            with self._lock:
+        reads = []
+        for i, (x, y) in enumerate(self.cfg["hole"]):
+            l, t, w, h = whole_roi((x, y), f"H{i}")
+            reads.append(self.card_reader.recognize(frame[t:t + h, l:l + w]))
+        det = tuple(card for card, _ in reads)
+        self._cand_n = self._cand_n + 1 if det == self._cand else 1
+        self._cand = det
+        if self._cand_n < 2:                          # wait for a stable read (no half-deal)
+            return
+        info = [inf for _, inf in reads]
+        with self._lock:
+            new_hand = self._locked_screen is not None and det != self._locked_screen
+            if not self.hole_locked:
+                if new_hand:                          # auto mode: fresh deal -> reset board
+                    self.board = []
+                self.hole, self._info, self._locked_screen = list(det), info, det
+            elif new_hand and self._cand_n >= 3:
+                # a typed correction is held until the physical cards really change
+                # (3 stable frames of a different read) — then it's a new hand.
                 self.hole_locked, self.board = False, []
-                self._cand, self._cand_n = None, 0
-        if present and not self.hole_locked:
-            reads = []
-            for i, (x, y) in enumerate(self.cfg["hole"]):
-                l, t, w, h = whole_roi((x, y), f"H{i}")
-                reads.append(self.card_reader.recognize(frame[t:t + h, l:l + w]))
-            det = tuple(card for card, _ in reads)
-            self._cand_n = self._cand_n + 1 if det == self._cand else 1
-            self._cand = det
-            if self._cand_n >= 2:                      # stable -> accept the guess
-                with self._lock:
-                    if not self.hole_locked:
-                        self.hole = list(det)
-                        self._info = [info for _, info in reads]
-        self._present_last = present
+                self.hole, self._info, self._locked_screen = list(det), info, det
 
     def _equity(self, hole, board, opp):
         key = (tuple(hole), tuple(board), opp)
