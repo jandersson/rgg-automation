@@ -302,8 +302,25 @@ class LauncherApp:
             return
         proc = launch(argv)
         self.procs.append(proc)
-        self.status.configure(text=f"launched (PID {proc.pid}) - overlay window opening...",
-                              foreground="#070")
+        self.status.configure(text=f"overlay running (PID {proc.pid})", foreground="#070")
+        self._watch(proc)
+
+    def _watch(self, proc):
+        """Poll the launched overlay and update the status when it stops (closed,
+        or exited early if it failed to start) — but only if it's still the latest."""
+        if proc.poll() is None:
+            self.root.after(1000, lambda: self._watch(proc))
+            return
+        if not (self.procs and self.procs[-1] is proc):
+            return                                    # a newer overlay was launched
+        code = proc.returncode
+        ok = code in (0, None)
+        try:
+            self.status.configure(
+                text="overlay stopped" if ok else f"overlay exited early (code {code})",
+                foreground="#070" if ok else "#a00")
+        except Exception:
+            pass
 
     def on_stop(self):
         live = [p for p in self.procs if p.poll() is None]
