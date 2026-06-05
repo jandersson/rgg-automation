@@ -599,7 +599,7 @@ class LauncherApp:
     def _pick(self, i):
         """Apply a picked card: rebuild the slot's group (hole or board) from the
         cells and push it to the advisor (which locks + banks it)."""
-        from ..cards import parse_card
+        from ..cards import parse_card, cards_str
         if not self._sess:
             return
         group = self._cells[i]["kind"]
@@ -610,8 +610,10 @@ class LauncherApp:
         adv = self._sess["advisor"]
         if group == "H" and len(cards) == 2:
             adv.set_hole(cards)
+            self.status.configure(text=f"set hole to {cards_str(cards)}", foreground="#070")
         elif group == "B" and cards:
             adv.set_board(cards)
+            self.status.configure(text=f"set board to {cards_str(cards)}", foreground="#070")
 
     def _refresh_corrections(self):
         from ..cards import INT_TO_RANK, INT_TO_SUIT

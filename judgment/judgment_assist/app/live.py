@@ -383,7 +383,9 @@ class PokerAdvisor:
                     self.card_reader.add_exemplar(whole, rank, suit)
                 saved.append(card_str(card))
         if saved:
-            print(f"  + learned {' '.join(saved)} ({len(saved)} new crop(s))")
+            where = "hole" if prefix == "H" else "board"
+            print(f"  learned {where} {' '.join(saved)}  "
+                  f"({len(saved)} new training example{'s' if len(saved) != 1 else ''})")
 
     # -- auto detection ------------------------------------------------------
     def _hole_present(self, frame):
