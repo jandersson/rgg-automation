@@ -152,15 +152,18 @@ class LauncherApp:
             ttk.Radiobutton(gf, text=g.capitalize(), value=g,
                             variable=self.v["game"]).grid(row=0, column=i, **pad)
 
-        # common settings
-        cf = ttk.LabelFrame(root, text="Overlay & capture")
-        cf.grid(row=1, column=0, sticky="ew", **pad)
-        ttk.Checkbutton(cf, text="Show overlay (uncheck = console only)",
-                        variable=self.v["overlay"]).grid(row=0, column=0, columnspan=4, sticky="w", **pad)
-        self._row(cf, 1, "Overlay X (from left)", "x", 6, "Y (from top)", "y", 6)
-        self._row(cf, 2, "Interval (s)", "interval", 6, "Min confidence", "min_confidence", 6)
-        ttk.Label(cf, text="Config").grid(row=3, column=0, sticky="w", **pad)
-        ttk.Entry(cf, textvariable=self.v["config"], width=34).grid(row=3, column=1, columnspan=3, sticky="ew", **pad)
+        # where the advice appears
+        ov = ttk.LabelFrame(root, text="Where to show the advice")
+        ov.grid(row=1, column=0, sticky="ew", **pad)
+        ttk.Checkbutton(ov, text="Floating box on top of the game",
+                        variable=self.v["overlay"]).grid(row=0, column=0, columnspan=5, sticky="w", **pad)
+        self._help(ov, 1, "Unchecked = print the advice in the console window instead.")
+        ttk.Label(ov, text="Position:").grid(row=2, column=0, sticky="w", **pad)
+        ttk.Entry(ov, textvariable=self.v["x"], width=5).grid(row=2, column=1, sticky="w")
+        ttk.Label(ov, text="across,").grid(row=2, column=2, sticky="w")
+        ttk.Entry(ov, textvariable=self.v["y"], width=5).grid(row=2, column=3, sticky="w")
+        ttk.Label(ov, text="down  (pixels from the top-left)").grid(row=2, column=4, sticky="w", **pad)
+        self._help(ov, 3, "Or just drag the box to where you want it once it opens.")
 
         # poker box
         self.pf = ttk.LabelFrame(root, text="Poker")
@@ -183,16 +186,30 @@ class LauncherApp:
         ttk.Label(self.bf, text="Log CSV (optional)").grid(row=3, column=0, sticky="w", **pad)
         ttk.Entry(self.bf, textvariable=self.v["log"], width=28).grid(row=3, column=1, columnspan=3, sticky="ew", **pad)
 
+        # advanced / rarely-changed settings
+        adv = ttk.LabelFrame(root, text="Advanced (defaults are usually fine)")
+        adv.grid(row=4, column=0, sticky="ew", **pad)
+        ttk.Label(adv, text="Re-read the screen every").grid(row=0, column=0, sticky="w", **pad)
+        ttk.Entry(adv, textvariable=self.v["interval"], width=5).grid(row=0, column=1, sticky="w")
+        ttk.Label(adv, text="seconds").grid(row=0, column=2, sticky="w", **pad)
+        ttk.Label(adv, text="Match confidence").grid(row=1, column=0, sticky="w", **pad)
+        ttk.Entry(adv, textvariable=self.v["min_confidence"], width=5).grid(row=1, column=1, sticky="w")
+        self._help(adv, 2, "0-1; lower reads more but misreads more. Leave at 0.6 unless reads are flaky.")
+        ttk.Label(adv, text="Calibration file").grid(row=3, column=0, sticky="w", **pad)
+        ttk.Entry(adv, textvariable=self.v["config"], width=24).grid(row=3, column=1, columnspan=2, sticky="ew", **pad)
+        ttk.Button(adv, text="Browse...", command=self._browse_config).grid(row=3, column=3, **pad)
+        self._help(adv, 4, "The screen regions from the one-time calibration step (regions.json).")
+
         # command preview + status
         self.preview = tk.Text(root, height=5, width=52, wrap="word",
                                bg="#101010", fg="#39ff14", font=("Consolas", 9))
-        self.preview.grid(row=4, column=0, sticky="ew", **pad)
+        self.preview.grid(row=5, column=0, sticky="ew", **pad)
         self.preview.configure(state="disabled")
         self.status = ttk.Label(root, text="", foreground="#a00")
-        self.status.grid(row=5, column=0, sticky="w", **pad)
+        self.status.grid(row=6, column=0, sticky="w", **pad)
 
         bf = ttk.Frame(root)
-        bf.grid(row=6, column=0, sticky="ew", **pad)
+        bf.grid(row=7, column=0, sticky="ew", **pad)
         ttk.Button(bf, text="Launch overlay", command=self.on_launch).grid(row=0, column=0, **pad)
         ttk.Button(bf, text="Stop overlay", command=self.on_stop).grid(row=0, column=1, **pad)
         ttk.Button(bf, text="Quit", command=self.on_quit).grid(row=0, column=2, **pad)
@@ -201,6 +218,24 @@ class LauncherApp:
         root.protocol("WM_DELETE_WINDOW", self.on_quit)   # X button closes overlays too
         self._toggle()
         self._refresh()
+
+    def _help(self, parent, row, text, col=0, colspan=5):
+        """A small grey hint line under a control."""
+        self.ttk.Label(parent, text=text, foreground="#888",
+                       font=("Segoe UI", 8)).grid(row=row, column=col, columnspan=colspan,
+                                                   sticky="w", padx=8)
+
+    def _browse_config(self):
+        from tkinter import filedialog
+        p = filedialog.askopenfilename(
+            title="Calibration file", initialdir=str(ROOT),
+            filetypes=[("JSON", "*.json"), ("All files", "*.*")])
+        if p:
+            try:
+                p = os.path.relpath(p, ROOT)
+            except ValueError:
+                pass
+            self.v["config"].set(p)
 
     def _row(self, parent, r, l1, k1, w1, l2, k2, w2):
         self.ttk.Label(parent, text=l1).grid(row=r, column=0, sticky="w", padx=8, pady=3)
