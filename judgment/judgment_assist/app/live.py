@@ -522,6 +522,36 @@ def _screen_dimmed(frame, thresh=50):
     return float(frame.mean()) < thresh
 
 
+# Key names -> Win32 virtual-key codes for the global confirm hotkey. F13-F24 are
+# ideal: games never use them, and a Steam controller back paddle can be mapped to
+# one in Steam's controller config. A few other safe keys are included too.
+_VK = {f"f{i}": 0x70 + (i - 1) for i in range(1, 25)}
+_VK.update(home=0x24, end=0x23, insert=0x2D, delete=0x2E,
+           pageup=0x21, pagedown=0x22, pause=0x13, scrolllock=0x91)
+
+
+def _key_poller(root, vk, on_press, interval_ms=60):
+    """Fire ``on_press`` on the rising edge of a key, system-wide (works while the
+    game is focused — that's the point). Polled on the tk loop; Windows only."""
+    import ctypes
+    get_state = ctypes.windll.user32.GetAsyncKeyState
+    get_state.restype = ctypes.c_short      # it returns a SHORT; without this ctypes
+    get_state.argtypes = [ctypes.c_int]     # misreads the high bits -> phantom presses
+    was_down = [False]
+
+    def poll():
+        try:
+            down = bool(get_state(vk) & 0x8000)
+            if down and not was_down[0]:
+                on_press()
+            was_down[0] = down
+        except Exception:
+            pass
+        root.after(interval_ms, poll)
+
+    root.after(interval_ms, poll)
+
+
 def run(a):
     cfg = load_config(a.config)
     # blackjack reads the HUD "Total" badges (config section 'hud'); poker reads
@@ -671,7 +701,7 @@ def run(a):
         hint = ("Hole + board are auto-detected (verify them). Advice updates live -\n"
                 "just play; click the game window to keep playing. To FIX a card click\n"
                 "the box: hole = As Kd, board = | Qh 7c 2d, one more = + Td, c = clear.\n"
-                "Enter banks the shown hand+board as correct (training).  q = quit."
+                "Enter (or your mapped controller button) banks the hand+board.  q = quit."
                 ) if a.game == "poker" else ""
         overlay = SuggestionOverlay(x=a.x, y=a.y, input_enabled=(a.game == "poker"),
                                     hint=hint)
@@ -680,6 +710,16 @@ def run(a):
                 if not cards_in.apply(line):    # 'q' -> stop
                     overlay.request_close()
             overlay.on_submit = _on_submit
+            # Global confirm hotkey (e.g. a Steam controller back paddle mapped to
+            # a key) — works even while the game has focus.
+            if os.name == "nt" and a.confirm_key:
+                vk = _VK.get(a.confirm_key.lower())
+                if vk:
+                    _key_poller(overlay.root, vk, poker.confirm)
+                    print(f"  confirm hotkey: {a.confirm_key.upper()} "
+                          f"(map a controller back button to it in Steam)")
+                else:
+                    print(f"  (confirm hotkey '{a.confirm_key}' unknown - see --help)")
 
     print(f"live {a.game} advisor running. overlay={'off' if a.no_overlay else 'on'}"
           + ("" if overlay else " (Ctrl-C to stop)"))
@@ -729,6 +769,10 @@ def main(argv=None):
                    help="disable hole-card auto-detection (type all cards manually)")
     p.add_argument("--no-learn", dest="learn", action="store_false",
                    help="don't save confirmed/corrected cards as new training data")
+    p.add_argument("--confirm-key", dest="confirm_key", default="f13",
+                   help="global key that confirms the hand, same as Enter (map a "
+                        "Steam controller back button to it). f13-f24 / home / end / "
+                        "insert / delete / pageup / pagedown / pause; '' to disable")
     p.add_argument("--interval", type=float, default=0.7, help="seconds between reads")
     p.add_argument("--min-confidence", dest="min_confidence", type=float, default=0.6)
     p.add_argument("--no-overlay", action="store_true", help="print to console instead")

@@ -33,6 +33,7 @@ DEFAULTS = {
     # poker
     "detect": True,         # False -> --no-detect
     "learn": True,          # False -> --no-learn
+    "confirm_key": "f13",   # global confirm hotkey (controller back button)
     "opp": 3,               # Judgment poker is 4-handed (you + 3)
     "iters": 12000,
     # blackjack
@@ -62,6 +63,7 @@ def build_argv(o):
             argv.append("--no-detect")
         if not o["learn"]:
             argv.append("--no-learn")
+        argv += ["--confirm-key", str(o["confirm_key"])]
     else:
         argv += ["--decks", str(o["decks"])]
         if o["count"]:
@@ -134,6 +136,7 @@ class LauncherApp:
             "overlay": tk.BooleanVar(value=DEFAULTS["overlay"]),
             "detect": tk.BooleanVar(value=DEFAULTS["detect"]),
             "learn": tk.BooleanVar(value=DEFAULTS["learn"]),
+            "confirm_key": tk.StringVar(value=DEFAULTS["confirm_key"]),
             "opp": tk.StringVar(value=str(DEFAULTS["opp"])),
             "iters": tk.StringVar(value=str(DEFAULTS["iters"])),
             "decks": tk.StringVar(value=str(DEFAULTS["decks"])),
@@ -182,6 +185,10 @@ class LauncherApp:
         ttk.Entry(self.pf, textvariable=self.v["iters"], width=8).grid(row=6, column=1, sticky="w")
         self._help(self.pf, 7, "Random deals run to estimate your win % - more = steadier odds, "
                                "a bit slower (default 12000).")
+        ttk.Label(self.pf, text="Confirm hotkey").grid(row=8, column=0, sticky="w", **pad)
+        ttk.Entry(self.pf, textvariable=self.v["confirm_key"], width=8).grid(row=8, column=1, sticky="w")
+        self._help(self.pf, 9, "Global key that confirms the hand (= Enter). Map a Steam "
+                               "controller back button to it. f13-f24/home/end/... ; blank = off.")
 
         # blackjack options
         self.bf = ttk.LabelFrame(root, text="Blackjack options")
@@ -268,6 +275,7 @@ class LauncherApp:
             "overlay": self.v["overlay"].get(),
             "detect": self.v["detect"].get(),
             "learn": self.v["learn"].get(),
+            "confirm_key": self.v["confirm_key"].get().strip(),
             "opp": int(self.v["opp"].get()),
             "iters": int(self.v["iters"].get()),
             "decks": int(self.v["decks"].get()),

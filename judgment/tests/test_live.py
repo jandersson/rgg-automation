@@ -201,6 +201,12 @@ def test_poker_advisor_street_follows_screen_and_prompts_for_board():
     assert "(flop)" in txt2 and ">>>" in txt2 and "type the board" not in txt2
 
 
+def test_confirm_hotkey_vk_map():
+    from judgment_assist.app.live import _VK
+    assert _VK["f13"] == 0x7C and _VK["f24"] == 0x87   # F13-F24 for the back button
+    assert "home" in _VK and "f1" in _VK
+
+
 def test_screen_dimmed_detects_pause():
     np = pytest.importorskip("numpy")
     live = np.full((100, 100, 3), 90, np.uint8)
