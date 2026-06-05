@@ -42,6 +42,22 @@ def test_matched_hand_drives_double_and_split_advice():
     assert recommend(pair8, 7).action == SPLIT
 
 
+def test_blackjack_text_hand_over_not_rereading():
+    from judgment_assist.app.live import blackjack_text
+
+    class FR:   # fake HUD reader returning fixed totals by ROI key
+        def __init__(self, d, p): self.d, self.p = d, p
+        def read_roi(self, frame, roi): return (self.d, 1.0) if roi == "D" else (self.p, 1.0)
+
+    roi = {"dealer_total": "D", "player_total": "P"}
+    # result frame: the dealer drew out to 20 -> "hand over", NEVER "re-reading"
+    t = blackjack_text(FR(20, 18), None, roi)
+    assert "re-reading" not in t and "hand over" in t and "DEALER 20" in t
+    assert "BUST" in blackjack_text(FR(10, 24), None, roi)          # player bust flagged
+    advice = blackjack_text(FR(6, 16), None, roi)                    # live decision still advises
+    assert ">>>" in advice and "DEALER 6" in advice
+
+
 def test_hand_tracker_dedupes_bust_and_keeps_upcard():
     # the real DB bug: a busted hand logged BUST/BUST/LOSE (3x) for one hand, and
     # dealer_up was the dealer's FINAL total (22), not the up-card (6).

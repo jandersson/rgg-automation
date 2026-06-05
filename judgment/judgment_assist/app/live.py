@@ -91,10 +91,15 @@ def blackjack_text(reader, frame, roi_cfg, true_count=None, card_reads=None):
     player, _pc = reader.read_roi(frame, roi_cfg["player_total"])
     if dealer is None or player is None:
         return "blackjack: waiting for a decision (totals not visible)..."
-    if not (2 <= dealer <= 11):
-        return f"blackjack: dealer total {dealer}? (re-reading)"
     if player > 21:
         return f"YOU {player} — BUST"
+    if dealer >= 12:
+        # During play the dealer shows only an up-card (2-11); a total of 12+ means
+        # the dealer has revealed/drawn -> the hand is resolved, nothing to advise.
+        # (The caller appends the LAST: outcome line.) NOT a misread.
+        return f"YOU {player}   DEALER {dealer}  (hand over)"
+    if dealer < 2:
+        return f"blackjack: dealer total {dealer}? (re-reading)"
     dlabel = "A" if dealer == 11 else str(dealer)
     hand = match_player_hand(card_reads, player)
     if hand is not None:
