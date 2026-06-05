@@ -217,8 +217,13 @@ class CardInput:
     def __init__(self, target, start=True):
         import threading
         self.target, self.stop = target, False
+        self._threading = threading
         if start:
-            threading.Thread(target=self._loop, daemon=True).start()
+            self.start_thread()
+
+    def start_thread(self):
+        """Read card commands from stdin on a daemon thread (console mode)."""
+        self._threading.Thread(target=self._loop, daemon=True).start()
 
     def apply(self, line):
         """Apply one input line by calling the target. Returns False on quit, else
@@ -522,23 +527,7 @@ def run(a):
                 print(f"  (learning off — {e})")
         poker = PokerAdvisor(reader, roi_cfg, opp_fallback=a.opp, iters=a.iters,
                              card_reader=card_reader, training=training)
-        cards_in = CardInput(poker)
-        if card_reader:
-            print("semi-auto poker: the overlay shows the cards it DETECTS in your hand;")
-            print("you confirm or correct them. Type commands in THIS window:")
-        else:
-            print("semi-auto poker: type your cards in THIS window as the hand develops:")
-        print("    (cards are rank+suit, e.g. As = ace of spades, Th = ten of hearts)")
-        print("    Enter        confirm the detected hand is correct")
-        print("    <two cards>  set/fix your hole cards     example:  As Kd")
-        print("    | <cards>    set the board               example:  | Qh 7c 2d")
-        print("    + <card>     add one board card          example:  + Td")
-        print("    c            clear the hand              q   quit")
-
-    overlay = None
-    if not a.no_overlay:
-        from .overlay import SuggestionOverlay
-        overlay = SuggestionOverlay(x=a.x, y=a.y)
+        cards_in = CardInput(poker, start=False)   # wired to the overlay box (or stdin if --no-overlay)
 
     monitor = cfg.get("monitor", 1)
     tracker = HandTracker()   # one event per hand (dedup) + the dealer up-card
@@ -551,68 +540,92 @@ def run(a):
         print(f"  logging each hand to {log_path}")
     if misses_dir:
         print(f"  saving reader-miss frames to {misses_dir}")
-    print(f"live {a.game} advisor running (Ctrl-C to stop). overlay={'off' if a.no_overlay else 'on'}")
+
+    def step(frame):
+        """One frame -> the overlay text (plus blackjack's per-frame side effects:
+        hand tracking, DB rows, counting, miss-saving)."""
+        nonlocal hand_no, last_result, miss_streak, miss_saved
+        # The game window collapses to 0x0 when minimized/not foreground; mss then
+        # returns an empty frame. Don't read it — wait.
+        if frame is None or frame.size == 0 or min(frame.shape[:2]) < 10:
+            return f"{a.game}: game window not visible (focus Judgment)..."
+        if a.game != "blackjack":
+            return poker.text(frame)
+        card_reads = read_clusters(frame, rank_rec) if rank_rec is not None else None
+        pt = dealer_up = None
+        if result_reader is not None or shoe is not None or misses_dir:
+            pt, _ = reader.read_roi(frame, roi_cfg["player_total"])
+            dealer_up, _ = reader.read_roi(frame, roi_cfg["dealer_total"])
+        cue = result_reader.read(frame) if result_reader is not None else None
+        event = tracker.update(pt, dealer_up, cue)
+        if event is not None:
+            outcome, dealer_upcard = event
+            last_result = outcome
+            hand_no += 1
+            if shoe is not None and shoe.end_hand(outcome) and log_path:
+                log_hand(log_path, shoe)
+            if store is not None:
+                store.record_hand(
+                    session_id, hand_no, outcome=outcome,
+                    player_total=pt, dealer_up=dealer_upcard,
+                    running=shoe.running if shoe else None,
+                    true_count=shoe.true_count if shoe else None,
+                    cards_seen=shoe.seen if shoe else None)
+        if shoe is not None:
+            shoe.observe([r for cl in (card_reads or []) for r in cl])
+        if misses_dir and card_reads and pt is not None and 2 <= pt <= 21:
+            if match_player_hand(card_reads, pt) is None:
+                miss_streak += 1
+                if miss_streak == 3 and not miss_saved:
+                    save_miss(misses_dir, frame, pt, card_reads)
+                    miss_saved = True
+            else:
+                miss_streak, miss_saved = 0, False
+        text = blackjack_text(reader, frame, roi_cfg,
+                              shoe.true_count if shoe else None, card_reads)
+        if last_result is not None:
+            text += f"\nLAST: {last_result}"
+        if shoe is not None:
+            text += "\n" + count_line(shoe)
+        return text
+
+    overlay = None
+    if not a.no_overlay:
+        from .overlay import SuggestionOverlay
+        hint = ("[Enter] confirm   fix hole: type e.g. As Kd   |Qh 7c 2d board   "
+                "+Td deal   c clear   Esc quit") if a.game == "poker" else ""
+        overlay = SuggestionOverlay(x=a.x, y=a.y, input_enabled=(a.game == "poker"),
+                                    hint=hint)
+        if a.game == "poker":
+            def _on_submit(line):
+                if not cards_in.apply(line):    # 'q' -> stop
+                    overlay.request_close()
+            overlay.on_submit = _on_submit
+
+    print(f"live {a.game} advisor running. overlay={'off' if a.no_overlay else 'on'}"
+          + ("" if overlay else " (Ctrl-C to stop)"))
     try:
         with ScreenGrabber(monitor=monitor) as g:
-            while True:
-                if cards_in is not None and cards_in.stop:    # poker: hero typed 'q'
-                    break
-                base = resolve_base(cfg)
-                frame = g.grab(base)
-                # The game window collapses to 0x0 when minimized/not foreground;
-                # mss then returns an empty frame. Don't read it — wait.
-                if frame is None or frame.size == 0 or min(frame.shape[:2]) < 10:
-                    text = f"{a.game}: game window not visible (focus Judgment)..."
-                elif a.game == "blackjack":
-                    # read the felt once: per-cluster for strategy, flattened for counting
-                    card_reads = read_clusters(frame, rank_rec) if rank_rec is not None else None
-                    # HUD totals: needed for bust detection, the DB row, and miss-saving.
-                    pt = dealer_up = None
-                    if result_reader is not None or shoe is not None or misses_dir:
-                        pt, _ = reader.read_roi(frame, roi_cfg["player_total"])
-                        dealer_up, _ = reader.read_roi(frame, roi_cfg["dealer_total"])
-                    # One event per finished hand (dedupes the bust cue + banner),
-                    # carrying the dealer up-card seen during play.
-                    cue = result_reader.read(frame) if result_reader is not None else None
-                    event = tracker.update(pt, dealer_up, cue)
-                    if event is not None:
-                        outcome, dealer_upcard = event
-                        last_result = outcome
-                        hand_no += 1
-                        if shoe is not None and shoe.end_hand(outcome) and log_path:
-                            log_hand(log_path, shoe)
-                        if store is not None:
-                            store.record_hand(
-                                session_id, hand_no, outcome=outcome,
-                                player_total=pt, dealer_up=dealer_upcard,
-                                running=shoe.running if shoe else None,
-                                true_count=shoe.true_count if shoe else None,
-                                cards_seen=shoe.seen if shoe else None)
-                    if shoe is not None:
-                        shoe.observe([r for cl in (card_reads or []) for r in cl])
-                    # save frames where the read disagrees with the HUD total (reader
-                    # misses) for later analysis — only sustained mismatches, once each
-                    if misses_dir and card_reads and pt is not None and 2 <= pt <= 21:
-                        if match_player_hand(card_reads, pt) is None:
-                            miss_streak += 1
-                            if miss_streak == 3 and not miss_saved:
-                                save_miss(misses_dir, frame, pt, card_reads)
-                                miss_saved = True
-                        else:
-                            miss_streak, miss_saved = 0, False
-                    text = blackjack_text(reader, frame, roi_cfg,
-                                          shoe.true_count if shoe else None, card_reads)
-                    if last_result is not None:
-                        text += f"\nLAST: {last_result}"
-                    if shoe is not None:
-                        text += "\n" + count_line(shoe)
-                else:
-                    text = poker.text(frame)
-                if overlay:
-                    overlay.update_text(text)
-                else:
-                    print("\n" + text)
-                time.sleep(a.interval)
+            if overlay is not None:
+                # tkinter-driven: the overlay owns the loop, so its input box stays
+                # responsive. We just re-read the screen on a timer.
+                interval_ms = max(50, int(a.interval * 1000))
+
+                def tick():
+                    if overlay.closed:
+                        return
+                    overlay.update_text(step(g.grab(resolve_base(cfg))))
+                    overlay.root.after(interval_ms, tick)
+
+                overlay.root.after(0, tick)
+                overlay.root.mainloop()
+            else:
+                # console mode: print advice; poker reads cards from stdin.
+                if a.game == "poker":
+                    cards_in.start_thread()
+                while not (cards_in is not None and cards_in.stop):
+                    print("\n" + step(g.grab(resolve_base(cfg))))
+                    time.sleep(a.interval)
     except KeyboardInterrupt:
         print("\nstopped.")
     finally:

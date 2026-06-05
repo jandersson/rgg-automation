@@ -68,8 +68,9 @@ Source is **PC Steam, borderless/windowed**; advice/overlay only (no inputs are
 sent to the game). With Judgment open on the blackjack/poker table:
 
 > **GUI launcher** — to pick the game and set the flags from a form instead of
-> the command line, run `uv run python -m judgment_assist.app.launcher`. It
-> launches the advisor (below) in its own console window with your chosen flags.
+> the command line, run `uv run python -m judgment_assist.app.launcher`. It opens
+> the advisor as a single floating overlay window (advice + the poker card-entry
+> box, no console) with your chosen flags.
 
 ```powershell
 uv run python -m judgment_assist.capture.calibrate windows                          # find the title
@@ -91,9 +92,13 @@ it. A typed hand locks until the next deal (the hole slots emptying re-arms it):
 
 ```powershell
 uv run python -m judgment_assist.app.live poker
-#   it shows e.g.  YOU 9c 8h  (detected black/red - type to fix)
-#   Enter  confirm hand   Ah Kh  fix hole   | Qh 7h 2h  board   + Td  deal   c  clear   q  quit
 ```
+
+One floating window shows the advice and has a text box for cards (no console).
+It reads e.g. `YOU 9c 8h  (detected ...)`; in the box: **Enter** confirms the
+detected hand, type two cards to fix the hole (`As Kd`), `| Qh 7c 2d` sets the
+board, `+ Td` deals a card, `c` clears, `Esc`/`q` quits. (Add `--no-overlay` to
+run headless in a console instead.)
 
 **It learns as you play.** Every hand you confirm (bare Enter) or correct (type
 the cards) is saved as a new labeled whole-card crop in `data/poker_cards` — the

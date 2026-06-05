@@ -3,10 +3,9 @@
     uv run python -m judgment_assist.app.launcher
 
 A small tkinter form (no extra deps, same toolkit as the overlay) over
-``app.live``'s flags. It spawns the advisor in its own console window so the
-poker card-entry prompt has a terminal and you can Ctrl-C / read logs, while the
-always-on-top overlay floats over the game. The launcher stays open so you can
-tweak and relaunch.
+``app.live``'s flags. The advisor runs as a single always-on-top overlay window —
+advice plus the poker card-entry box, no console. The launcher stays open so you
+can tweak and relaunch (and closing it stops the overlays it started).
 
 ``build_argv`` (the flag→argv mapping) is a pure function so it can be unit
 tested without a display; the tkinter UI is a thin shell around it.
@@ -75,12 +74,13 @@ def build_argv(o):
 
 
 def launch(argv):
-    """Spawn ``app.live`` with ``argv`` in a new console window (Windows) so the
-    poker prompt has stdin and logs are visible. Returns the Popen handle."""
+    """Spawn ``app.live`` with ``argv``. Card entry is now in the overlay window
+    itself, so no console is needed — suppress the console window on Windows.
+    Returns the Popen handle."""
     cmd = [sys.executable, "-m", "judgment_assist.app.live", *argv]
     kwargs = {"cwd": str(ROOT)}
     if os.name == "nt":
-        kwargs["creationflags"] = subprocess.CREATE_NEW_CONSOLE
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     return subprocess.Popen(cmd, **kwargs)
 
 
@@ -154,18 +154,17 @@ class LauncherApp:
         self._help(gf, 1, "Poker = Hold'em equity + pot-odds.   Blackjack = basic-strategy advice.",
                    colspan=3)
 
-        # where the advice appears
-        ov = ttk.LabelFrame(root, text="Where to show the advice")
+        # the overlay (one window: advice + the card-entry box)
+        ov = ttk.LabelFrame(root, text="Overlay")
         ov.grid(row=1, column=0, sticky="ew", **pad)
-        ttk.Checkbutton(ov, text="Floating box on top of the game",
-                        variable=self.v["overlay"]).grid(row=0, column=0, columnspan=5, sticky="w", **pad)
-        self._help(ov, 1, "Unchecked = print the advice in the console window instead.")
-        ttk.Label(ov, text="Position:").grid(row=2, column=0, sticky="w", **pad)
-        ttk.Entry(ov, textvariable=self.v["x"], width=5).grid(row=2, column=1, sticky="w")
-        ttk.Label(ov, text="across,").grid(row=2, column=2, sticky="w")
-        ttk.Entry(ov, textvariable=self.v["y"], width=5).grid(row=2, column=3, sticky="w")
-        ttk.Label(ov, text="down  (pixels from the top-left)").grid(row=2, column=4, sticky="w", **pad)
-        self._help(ov, 3, "Or just drag the box to where you want it once it opens.")
+        self._help(ov, 0, "A floating box over the game shows the advice and (poker) "
+                          "takes your card entry - all in one window.")
+        ttk.Label(ov, text="Position:").grid(row=1, column=0, sticky="w", **pad)
+        ttk.Entry(ov, textvariable=self.v["x"], width=5).grid(row=1, column=1, sticky="w")
+        ttk.Label(ov, text="across,").grid(row=1, column=2, sticky="w")
+        ttk.Entry(ov, textvariable=self.v["y"], width=5).grid(row=1, column=3, sticky="w")
+        ttk.Label(ov, text="down  (pixels from the top-left)").grid(row=1, column=4, sticky="w", **pad)
+        self._help(ov, 2, "Or just drag the box to where you want it once it opens.")
 
         # poker options
         self.pf = ttk.LabelFrame(root, text="Poker options")
@@ -303,7 +302,7 @@ class LauncherApp:
             return
         proc = launch(argv)
         self.procs.append(proc)
-        self.status.configure(text=f"launched (PID {proc.pid}) in a new console",
+        self.status.configure(text=f"launched (PID {proc.pid}) - overlay window opening...",
                               foreground="#070")
 
     def on_stop(self):
