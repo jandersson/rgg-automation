@@ -234,6 +234,55 @@ def build_card_task(frame_glob_or_paths, out_dir="data/crops/_cards", width_frac
     return task
 
 
+def build_poker_task(frame_glob_or_paths, config_path="config/regions.json",
+                     out_dir="data/poker_cards", dedup=7):
+    """Crop the top-left rank+suit corner of each fixed poker card slot (2 hole +
+    5 board, from the config 'poker' ROIs) across frames, dedupe near-identical
+    crops, and write a rank+suit labeling task. Slots with no face-up card (empty
+    board, a centred result banner, an opponent's face-down back) are skipped via
+    a card-face test: a real corner is mostly bright white-card with a small glyph."""
+    import cv2
+    import numpy as np
+    from ..vision.locate import _WHITE_LO, _WHITE_HI
+    cfg = json.load(open(config_path, encoding="utf-8"))["poker"]
+    cw, ch = cfg["corner"]
+    slots = ([(f"H{i}", x, y) for i, (x, y) in enumerate(cfg["hole"])] +
+             [(f"B{i}", x, y) for i, (x, y) in enumerate(cfg["board"])])
+    paths = (sorted(glob.glob(frame_glob_or_paths)) if isinstance(frame_glob_or_paths, str)
+             else list(frame_glob_or_paths))
+    os.makedirs(out_dir, exist_ok=True)
+
+    def is_card(c):
+        g = cv2.cvtColor(c, cv2.COLOR_BGR2GRAY)
+        white = cv2.inRange(cv2.cvtColor(c, cv2.COLOR_BGR2HSV), _WHITE_LO, _WHITE_HI)
+        return white.mean() / 255.0 > 0.55 and g.mean() > 140
+
+    kept, items = [], []
+    for fp in paths:
+        im = cv2.imread(fp)
+        if im is None:
+            continue
+        stem = os.path.splitext(os.path.basename(fp))[0]
+        for name, x, y in slots:
+            c = im[y:y + ch, x:x + cw]
+            if c.shape[:2] != (ch, cw) or not is_card(c):
+                continue
+            g = cv2.resize(cv2.cvtColor(c, cv2.COLOR_BGR2GRAY), (18, 26)).astype("int16")
+            if any(float(np.mean(np.abs(g - k))) < dedup for k in kept):
+                continue
+            kept.append(g)
+            cpath = os.path.join(out_dir, f"{stem}_{name}.png")
+            cv2.imwrite(cpath, cv2.resize(c, None, fx=3, fy=3, interpolation=cv2.INTER_NEAREST))
+            items.append({"id": f"{stem}#{name}", "image": cpath})
+    task = {"title": "Poker cards", "prompt": "Rank and suit of THIS card?",
+            "fields": [{"name": "rank", "labels": RANKS},
+                       {"name": "suit", "labels": ["clubs", "diamonds", "hearts", "spades"]}],
+            "allow_skip": True, "items": items, "out": os.path.join(out_dir, "labels.json")}
+    with open(os.path.join(out_dir, "task.json"), "w", encoding="utf-8") as f:
+        json.dump(task, f, indent=1)
+    return task
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="judgment-assist label")
     p.add_argument("--task", help="an existing task JSON")
@@ -241,7 +290,8 @@ def main(argv=None):
     p.add_argument("--labels", help="comma-separated label set (with --dir)")
     p.add_argument("--prompt", default="Label this image", help="prompt (with --dir)")
     p.add_argument("--out", help="results JSON path (with --dir)")
-    p.add_argument("--cards", nargs="+", help="frame paths/globs -> build a card rank+colour task")
+    p.add_argument("--cards", nargs="+", help="frame paths/globs -> build a blackjack card rank+colour task")
+    p.add_argument("--poker", nargs="+", help="frame paths/globs -> build a poker rank+suit corner task")
     a = p.parse_args(argv)
 
     if a.task:
@@ -250,6 +300,10 @@ def main(argv=None):
         paths = [q for g in a.cards for q in (glob.glob(g) or [g])]
         task = build_card_task(paths)
         print(f"built card task: {len(task['items'])} crops -> {task['out']}")
+    elif a.poker:
+        paths = [q for g in a.poker for q in (glob.glob(g) or [g])]
+        task = build_poker_task(paths)
+        print(f"built poker task: {len(task['items'])} crops -> {task['out']}")
     elif a.dir:
         if not a.labels:
             raise SystemExit("--dir needs --labels a,b,c")

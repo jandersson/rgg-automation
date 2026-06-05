@@ -20,3 +20,6 @@ judgment/data/crops/
 judgment/data/screens/
 judgment/data/synthetic/
 judgment/data/models/
+judgment/data/poker/
+judgment/data/poker_cards/
+judgment/data/poker_templates/
