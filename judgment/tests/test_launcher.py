@@ -14,6 +14,17 @@ class _FakeProc:
         self._running = False
 
 
+def test_single_instance_lock():
+    import os
+    import pytest
+    if os.name != "nt":
+        pytest.skip("named-mutex lock is Windows-only")
+    from judgment_assist.app.launcher import acquire_single_instance
+    first = acquire_single_instance()
+    assert first                                  # got the lock
+    assert acquire_single_instance() is None       # a second launcher is refused
+
+
 def test_terminate_all_kills_running_only():
     running, done = _FakeProc(True), _FakeProc(False)
     assert terminate_all([running, done]) == 1     # only the live one

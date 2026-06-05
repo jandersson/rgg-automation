@@ -346,8 +346,38 @@ class LauncherApp:
         self.root.destroy()
 
 
+_MUTEX_NAME = "rgg-advisor-launcher"
+
+
+def acquire_single_instance():
+    """Return a lock handle, or None if a launcher is already running. Uses a named
+    mutex on Windows (no deps); a no-op elsewhere. Keep the returned handle alive
+    for the process lifetime — the OS frees the mutex when the process exits."""
+    if os.name != "nt":
+        return True
+    import ctypes
+    k = ctypes.windll.kernel32
+    handle = k.CreateMutexW(None, False, _MUTEX_NAME)
+    if k.GetLastError() == 183:        # ERROR_ALREADY_EXISTS -> another instance
+        if handle:
+            k.CloseHandle(handle)
+        return None
+    return handle
+
+
 def main():
     import tkinter as tk
+    lock = acquire_single_instance()
+    if lock is None:                   # only one launcher at a time
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            from tkinter import messagebox
+            messagebox.showinfo("RGG advisor launcher",
+                                "The launcher is already running.")
+        finally:
+            root.destroy()
+        return
     root = tk.Tk()
     LauncherApp(root)
     root.mainloop()
