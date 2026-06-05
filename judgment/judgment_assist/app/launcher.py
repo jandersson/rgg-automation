@@ -476,6 +476,10 @@ class LauncherApp:
                         variable=self.corr_mode).grid(row=0, column=1, padx=4)
         ttk.Radiobutton(mt, text="Card grid", value="grid",
                         variable=self.corr_mode).grid(row=0, column=2)
+        ttk.Button(mt, text="✓ Confirm hand (all correct)",
+                   command=self._confirm_hotkey).grid(row=0, column=3, padx=16)
+        ttk.Label(mt, text="(or your R4 / Insert button)", foreground="#888",
+                  font=("Segoe UI", 8)).grid(row=0, column=4)
 
         self.dd = ttk.Frame(self.cf2)        # dropdown style
         self.grd = ttk.Frame(self.cf2)       # card-grid style
