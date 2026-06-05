@@ -1,7 +1,11 @@
 """Tests for the live advisor's player-hand identification + full-strategy upgrade."""
-from judgment_assist.app.live import match_player_hand, log_hand, HandTracker
+import pytest
+
+from judgment_assist.app.live import (match_player_hand, log_hand, HandTracker,
+                                      CardInput, PokerAdvisor)
 from judgment_assist.blackjack.counting import ShoeCounter
 from judgment_assist.blackjack.strategy import recommend, DOUBLE, SPLIT
+from judgment_assist.cards import parse_cards, cards_str
 
 
 def test_match_player_hand_picks_cluster_matching_total():
@@ -89,6 +93,102 @@ def test_hand_tracker_skips_hand_not_watched_from_play():
     # the next hand, observed from its play phase, logs normally
     assert t.update(17, 8, None) is None
     assert t.update(17, 8, "WIN") == ("WIN", 8)
+
+
+# ----------------------------------------------------- semi-auto poker input --
+def test_card_input_sets_hole_and_board():
+    ci = CardInput(start=False)
+    ci.apply("Ah Kh")                       # hole only -> preflop
+    assert ci.get() == (parse_cards("Ah Kh"), [])
+    ci.apply("Ah Kh | Qh 7h 2h")            # hole + board
+    assert cards_str(ci.get()[1]) == "Qh 7h 2h"
+
+
+def test_card_input_append_and_board_only():
+    ci = CardInput(start=False)
+    ci.apply("Ah Kh | Qh 7h 2h")
+    ci.apply("+ Td")                         # deal the turn, keep hole+flop
+    hole, board = ci.get()
+    assert cards_str(hole) == "Ah Kh" and cards_str(board) == "Qh 7h 2h Td"
+    ci.apply("| Qh 7h 2h Td Js")             # update board only, hole untouched
+    assert cards_str(ci.get()[0]) == "Ah Kh"
+    assert cards_str(ci.get()[1]) == "Qh 7h 2h Td Js"
+
+
+def test_card_input_bad_cards_leave_state_intact():
+    ci = CardInput(start=False)
+    ci.apply("Ah Kh")
+    with pytest.raises(ValueError):
+        ci.apply("Zz Kh")                    # typo -> raises, state unchanged
+    assert cards_str(ci.get()[0]) == "Ah Kh"
+
+
+def test_card_input_quit():
+    ci = CardInput(start=False)
+    assert ci.apply("q") is False and ci.stop is True
+
+
+class _FakeReader:
+    """Stand-in HudReader: returns a value per ROI key (poker section uses string
+    keys for the number ROIs so the fake can map them)."""
+    def __init__(self, vals):
+        self.vals = vals
+
+    def read_roi(self, frame, roi, white=False):
+        return self.vals.get(roi), 1.0
+
+
+def _poker_cfg():
+    # board ROIs land on dealt felt; banners are blank (all active). String keys
+    # for the number ROIs let _FakeReader resolve them.
+    return {"corner": [70, 105],
+            "board": [[296, 298], [562, 298], [838, 298], [1128, 298], [1410, 298]],
+            "pot": "pot", "bet": "my",
+            "opp_bet": ["o0", "o1", "o2"],
+            "opp_banner": [[0, 0, 95, 42], [100, 0, 95, 42], [200, 0, 95, 42]]}
+
+
+def _felt_with_board(n):
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("cv2")
+    f = np.full((1080, 1920, 3), (70, 120, 40), np.uint8)
+    for x, y in _poker_cfg()["board"][:n]:
+        f[y:y + 200, x - 4:x + 180] = (245, 245, 245)
+    return f
+
+
+def test_poker_advisor_prompts_without_hole_cards():
+    reader = _FakeReader({"pot": 40, "my": 0, "o0": 20, "o1": 20, "o2": 0})
+    pa = PokerAdvisor(reader, _poker_cfg(), iters=2000)
+    txt = pa.text(_felt_with_board(0), [], [])
+    assert "type your hole cards" in txt
+    assert "to-call 20" in txt and "vs 3 active" in txt    # auto-read still shown
+
+
+def test_poker_advisor_full_advice_uses_autoread_state():
+    # flop, hero owes 5 to call into a 20 pot vs 3 active opponents
+    reader = _FakeReader({"pot": 20, "my": 15, "o0": 20, "o1": 20, "o2": 20})
+    pa = PokerAdvisor(reader, _poker_cfg(), iters=4000)
+    txt = pa.text(_felt_with_board(3), parse_cards("Ac As"), parse_cards("Ah Kd 9s"))
+    assert "vs 3 active" in txt and "to-call 5" in txt
+    assert "three of a kind" in txt and ">>> RAISE" in txt
+
+
+def test_poker_advisor_flags_duplicate_cards():
+    reader = _FakeReader({"pot": 20, "my": 0, "o0": 0, "o1": 0, "o2": 0})
+    pa = PokerAdvisor(reader, _poker_cfg(), iters=2000)
+    txt = pa.text(_felt_with_board(3), parse_cards("Ah Kd"), parse_cards("Ah 2c 3d"))
+    assert "duplicate card" in txt
+
+
+def test_poker_advisor_caches_equity_across_frames():
+    reader = _FakeReader({"pot": 20, "my": 0, "o0": 0, "o1": 0, "o2": 0})
+    pa = PokerAdvisor(reader, _poker_cfg(), iters=4000)
+    f = _felt_with_board(3)
+    pa.text(f, parse_cards("Ac As"), parse_cards("Ah Kd 9s"))
+    first = pa._eq
+    pa.text(f, parse_cards("Ac As"), parse_cards("Ah Kd 9s"))
+    assert pa._eq is first                                  # same cards -> not recomputed
 
 
 def test_log_hand_writes_a_csv_row(tmp_path):

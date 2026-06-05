@@ -61,13 +61,27 @@ for trustworthy hand advice, and very likely never will be.
 ## The realistic tool — semi-automatic
 
 Accept that the cards can't be auto-read; lean on what works:
-- You type your 2 hole cards + the board (the manual CLI).
-- The tool auto-reads the **pot, street, and opponent count** and shows equity + pot
-  odds.
+- You type your 2 hole cards + the board (live overlay or the manual CLI).
+- The tool auto-reads the **pot, street, active-opponent count and to_call** and
+  shows equity + pot odds + a fold/call/raise call.
 
 That's a genuinely useful poker assistant that sidesteps the one thing the screen
-won't give us. (Wiring not yet built — `to_call` = max active-opponent Bet − player
-Bet still TODO, plus the overlay glue.)
+won't give us. **Built** (`app/live.py poker`):
+
+- **`to_call`** = max *active*-opponent Bet − hero Bet (floored at 0).
+  `vision/poker.py` reads each opponent's Bet plate with the white-glyph HUD
+  reader (`opp_bet` ROIs, validated against `data/poker`) and detects folds
+  label-free: a folded seat keeps a "Fold" banner with a unique **cyan** double-
+  chevron icon (Call = green, Raise = red), so a saturated-cyan pixel count in the
+  `opp_banner` box separates folded from active cleanly (whole-session check: ≤1 px
+  non-fold vs 150–250 fold, no overlap). A folded player never holds the max bet,
+  so this also gives the right `to_call`; the active count feeds equity's opponent
+  number.
+- **Overlay glue** — `live.py poker` runs semi-auto: a background stdin thread
+  takes your `hole | board` (with `+ Td` to deal a card), each frame auto-reads
+  `table_state` (pot / street / active opps / to_call) and shows the advice. The
+  Monte-Carlo equity is cached on (hole, board, opp) so only the cheap pot-odds
+  decision recomputes per frame (`advisor.decide`).
 
 ## Dependencies note
 
@@ -78,6 +92,7 @@ removed to keep the project lean.
 
 ## Open issues / next
 
-- **#4** Poker equity overlay + chip OCR — chip OCR done; overlay = the semi-auto glue.
+- **#4** Poker equity overlay + chip OCR — **done** (chip/pot OCR, opponent
+  bet + fold reading → to_call, and the semi-auto live overlay).
 - **#5** tilted/overlapping fan recognition — N/A for poker (flat cards); the poker
   card wall is contamination + sample size, a different problem.
