@@ -24,6 +24,13 @@ def test_poker_no_detect_and_console_only():
     assert argv[argv.index("--opp") + 1] == "3"
 
 
+def test_poker_learning_default_on_flag_when_off():
+    assert "--no-learn" not in build_argv(_opts(game="poker"))          # on by default
+    assert "--no-learn" in build_argv(_opts(game="poker", learn=False))
+    # blackjack never emits the poker-only learn flag
+    assert "--no-learn" not in build_argv(_opts(game="blackjack", learn=False))
+
+
 def test_blackjack_flags():
     argv = build_argv(_opts(game="blackjack", count=True, db=False, log="hands.csv"))
     assert argv[0] == "blackjack"

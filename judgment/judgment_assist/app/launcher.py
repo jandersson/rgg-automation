@@ -33,6 +33,7 @@ DEFAULTS = {
     "overlay": True,        # False -> --no-overlay (console only)
     # poker
     "detect": True,         # False -> --no-detect
+    "learn": True,          # False -> --no-learn
     "opp": 2,
     "iters": 12000,
     # blackjack
@@ -60,6 +61,8 @@ def build_argv(o):
         argv += ["--opp", str(o["opp"]), "--iters", str(o["iters"])]
         if not o["detect"]:
             argv.append("--no-detect")
+        if not o["learn"]:
+            argv.append("--no-learn")
     else:
         argv += ["--decks", str(o["decks"])]
         if o["count"]:
@@ -101,6 +104,7 @@ class LauncherApp:
             "y": tk.StringVar(value=str(DEFAULTS["y"])),
             "overlay": tk.BooleanVar(value=DEFAULTS["overlay"]),
             "detect": tk.BooleanVar(value=DEFAULTS["detect"]),
+            "learn": tk.BooleanVar(value=DEFAULTS["learn"]),
             "opp": tk.StringVar(value=str(DEFAULTS["opp"])),
             "iters": tk.StringVar(value=str(DEFAULTS["iters"])),
             "decks": tk.StringVar(value=str(DEFAULTS["decks"])),
@@ -134,7 +138,9 @@ class LauncherApp:
         self.pf.grid(row=2, column=0, sticky="ew", **pad)
         ttk.Checkbutton(self.pf, text="Auto-detect hole cards (correct by typing)",
                         variable=self.v["detect"]).grid(row=0, column=0, columnspan=4, sticky="w", **pad)
-        self._row(self.pf, 1, "Opponents (fallback)", "opp", 6, "Equity iters", "iters", 8)
+        ttk.Checkbutton(self.pf, text="Learn: save confirmed/corrected cards as training data",
+                        variable=self.v["learn"]).grid(row=1, column=0, columnspan=4, sticky="w", **pad)
+        self._row(self.pf, 2, "Opponents (fallback)", "opp", 6, "Equity iters", "iters", 8)
 
         # blackjack box
         self.bf = ttk.LabelFrame(root, text="Blackjack")
@@ -190,6 +196,7 @@ class LauncherApp:
             "y": int(self.v["y"].get()),
             "overlay": self.v["overlay"].get(),
             "detect": self.v["detect"].get(),
+            "learn": self.v["learn"].get(),
             "opp": int(self.v["opp"].get()),
             "iters": int(self.v["iters"].get()),
             "decks": int(self.v["decks"].get()),

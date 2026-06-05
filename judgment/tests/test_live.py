@@ -208,12 +208,25 @@ class _FakeCardReader:
     """Stand-in HoleCardReader: returns the two given (card, info) pairs in
     alternation (one per corner), so each frame reads the same two cards."""
     def __init__(self, pair):
-        self.pair, self.i = pair, 0
+        self.pair, self.i, self.added = pair, 0, []
 
     def recognize(self, corner_bgr):
         r = self.pair[self.i % 2]
         self.i += 1
         return r
+
+    def add_exemplar(self, corner_bgr, rank, suit):
+        self.added.append((rank, suit))
+
+
+class _RecWriter:
+    """Records what would be saved as training data (rank, suit, slot)."""
+    def __init__(self):
+        self.saved = []
+
+    def save(self, corner_bgr, rank, suit, slot):
+        self.saved.append((cards_str([(rank, suit)]), slot))
+        return True
 
 
 def test_poker_advisor_autodetects_hole_then_locks_on_override():
@@ -231,6 +244,45 @@ def test_poker_advisor_autodetects_hole_then_locks_on_override():
     pa.set_hole(parse_cards("Ah Kh"))        # hero corrects -> locks, detection stops
     pa.text(f)
     assert cards_str(pa.hole) == "Ah Kh" and pa.hole_locked
+
+
+def test_poker_advisor_captures_correction_as_training():
+    w = _RecWriter()
+    pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
+                      _poker_cfg(), iters=2000, training=w)
+    pa.text(_felt_with_board(2))             # both hole slots face-up, frame cached
+    pa.set_hole(parse_cards("Ah Kd"))        # correction -> saved with your labels
+    assert w.saved == [("Ah", "H0"), ("Kd", "H1")]
+
+
+def test_poker_advisor_confirm_saves_detected_hand():
+    det = ((parse_cards("Ac")[0], {"color": "black"}),
+           (parse_cards("Kd")[0], {"color": "red"}))
+    cr, w = _FakeCardReader(det), _RecWriter()
+    pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
+                      _poker_cfg(), iters=2000, card_reader=cr, training=w)
+    f = _felt_with_board(2)
+    pa.text(f); pa.text(f)                    # detect -> hole set (unlocked)
+    pa.confirm()                              # bare Enter -> lock + save detected
+    assert w.saved == [("Ac", "H0"), ("Kd", "H1")] and pa.hole_locked
+    assert len(cr.added) == 2                 # hot-added to the live reader too
+
+
+def test_poker_advisor_captures_typed_board():
+    w = _RecWriter()
+    pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
+                      _poker_cfg(), iters=2000, training=w)
+    pa.text(_felt_with_board(3))
+    pa.set_board(parse_cards("Qh 7h 2h"))    # typed board cards are labels too
+    assert [slot for _, slot in w.saved] == ["B0", "B1", "B2"]
+
+
+def test_poker_advisor_no_capture_when_learning_off():
+    pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
+                      _poker_cfg(), iters=2000, training=None)   # learn off
+    pa.text(_felt_with_board(2))
+    pa.set_hole(parse_cards("Ah Kd"))        # no writer -> no crash, just sets state
+    assert cards_str(pa.hole) == "Ah Kd"
 
 
 def test_poker_advisor_redetects_after_new_deal():

@@ -92,8 +92,14 @@ next deal (the hole slots emptying re-arms detection):
 ```powershell
 uv run python -m judgment_assist.app.live poker
 #   it shows e.g.  YOU 9c 8h  (detected black/red - type to fix)
-#   Ah Kh  confirm/fix hole   | Qh 7h 2h  board   + Td  deal   c  clear   q  quit
+#   Enter  confirm hand   Ah Kh  fix hole   | Qh 7h 2h  board   + Td  deal   c  clear   q  quit
 ```
+
+**It learns as you play.** Every hand you confirm (bare Enter) or correct (type
+the cards) is saved as a new labeled corner crop in `data/poker_cards` — the same
+format the detector reads — and hot-added to the running reader, so detection
+improves within the session and more so on the next launch. Board cards you type
+are captured too. Near-identical crops are deduped; `--no-learn` turns it off.
 
 It needs the `poker` ROIs, the white-on-plate digit glyphs (`--poker-digits`,
 default `data/poker_digits`), and the labeled corner crops used for detection

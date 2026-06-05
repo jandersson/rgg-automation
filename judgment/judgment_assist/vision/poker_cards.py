@@ -29,7 +29,7 @@ try:
 except Exception:  # pragma: no cover
     _HAVE = False
 
-from ..cards import RANK_TO_INT, SUIT_TO_INT
+from ..cards import RANK_TO_INT, SUIT_TO_INT, INT_TO_RANK
 
 # Canonical corner geometry (the config's default) and the rank/suit sub-boxes
 # within it, as (y0, y1, x0, x1). The suit box is read in colour for the red test.
@@ -37,6 +37,7 @@ _CORNER = (70, 105)                       # (w, h)
 _RANK_BOX = (4, 60, 2, 54)
 _SUIT_BOX = (56, 100, 0, 52)
 _SUIT_LETTER = {"clubs": "c", "diamonds": "d", "hearts": "h", "spades": "s"}
+_SUIT_NAME = {SUIT_TO_INT[v]: k for k, v in _SUIT_LETTER.items()}   # int -> "clubs"
 _RED = {SUIT_TO_INT["h"], SUIT_TO_INT["d"]}
 
 
@@ -132,6 +133,15 @@ class HoleCardReader:
         suit, _ = _best(suit_g, ex)
         return (rank, suit), {"rank_conf": rank_conf, "color": "red" if red else "black"}
 
+    def add_exemplar(self, corner_bgr, rank_int, suit_int):
+        """Add a confirmed/corrected card to the in-memory library so detection
+        improves immediately (same-session), without a reload."""
+        corner = cv2.resize(corner_bgr, _CORNER)
+        rg, sg = self._regions(corner)
+        self._rank_ex.append((rank_int, _ink_bbox(rg)))
+        suit_gray = cv2.cvtColor(sg, cv2.COLOR_BGR2GRAY)
+        self._suit_ex[suit_int in _RED].append((suit_int, _ink_bbox(suit_gray)))
+
     def read_hole(self, frame_bgr, cfg):
         """Detect both hole cards from a full frame. Returns a list of
         ``(card, info)`` for each face-up hole slot, or ``None`` for an empty /
@@ -146,3 +156,49 @@ class HoleCardReader:
             else:
                 out.append(self.recognize(corner))
         return out
+
+
+class TrainingWriter:
+    """Persists confirmed/corrected card corners as new labeled exemplars, in the
+    same ``data/poker_cards`` format the reader (and ``label --poker``) use — so
+    the library grows as you play and each new launch reads better.
+
+    Deduped against the existing crops (near-identical corners are dropped) so
+    confirming the same static hand repeatedly doesn't flood the set. Saves the
+    3x-magnified corner PNG + a ``labels.json`` entry, exactly like the labeler."""
+
+    def __init__(self, card_dir="data/poker_cards", dedup=7):
+        if not _HAVE:
+            raise RuntimeError("training writer needs numpy + opencv")
+        self.dir, self.dedup = card_dir, dedup
+        os.makedirs(card_dir, exist_ok=True)
+        self.labels_path = os.path.join(card_dir, "labels.json")
+        self.labels = (json.load(open(self.labels_path, encoding="utf-8"))
+                       if os.path.exists(self.labels_path) else {})
+        self._sigs = []
+        for key in self.labels:                       # signatures for dedup
+            frame, slot = key.split("#")
+            im = cv2.imread(os.path.join(card_dir, f"{frame}_{slot}.png"))
+            if im is not None:
+                self._sigs.append(self._sig(im))
+        self._seq, self._pid = 0, os.getpid()
+
+    def _sig(self, crop):
+        return cv2.resize(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), (18, 26)).astype("int16")
+
+    def save(self, corner_bgr, rank_int, suit_int, slot):
+        """Write one labeled corner unless a near-identical one already exists.
+        Returns True if a new exemplar was written."""
+        sig = self._sig(corner_bgr)
+        if any(float(np.mean(np.abs(sig - s))) < self.dedup for s in self._sigs):
+            return False
+        self._seq += 1
+        fid = f"live{self._pid}_{self._seq}"
+        crop3x = cv2.resize(corner_bgr, None, fx=3, fy=3, interpolation=cv2.INTER_NEAREST)
+        cv2.imwrite(os.path.join(self.dir, f"{fid}_{slot}.png"), crop3x)
+        self.labels[f"{fid}#{slot}"] = {"rank": INT_TO_RANK[rank_int],
+                                        "suit": _SUIT_NAME[suit_int]}
+        self._sigs.append(sig)
+        with open(self.labels_path, "w", encoding="utf-8") as f:
+            json.dump(self.labels, f, indent=1)
+        return True

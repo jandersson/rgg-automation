@@ -2,6 +2,8 @@
 
 Construction loads the labeled corner library (gitignored data), so these tests
 exercise the pure pieces and recognize() with injected exemplars instead."""
+import json
+
 import pytest
 
 np = pytest.importorskip("numpy")
@@ -63,3 +65,28 @@ def test_recognize_picks_matching_rank_and_colour():
     (rank2, suit2), info2 = r.recognize(_corner_with("A", red=False))
     assert rank2 == RANK_TO_INT["A"] and info2["color"] == "black"
     assert suit2 == SUIT_TO_INT["c"]
+
+
+def test_add_exemplar_grows_library_and_recognizes():
+    r = PC.HoleCardReader.__new__(PC.HoleCardReader)
+    r._rank_ex, r._suit_ex = [], {True: [], False: []}
+    r.add_exemplar(_corner_with("2", red=False), RANK_TO_INT["2"], SUIT_TO_INT["c"])
+    r.add_exemplar(_corner_with("9", red=True), RANK_TO_INT["9"], SUIT_TO_INT["h"])
+    assert len(r._rank_ex) == 2 and len(r._suit_ex[True]) == 1
+    (rank, _), info = r.recognize(_corner_with("9", red=True))
+    assert rank == RANK_TO_INT["9"] and info["color"] == "red"
+
+
+def test_training_writer_saves_dedups_persists(tmp_path):
+    w = PC.TrainingWriter(str(tmp_path))
+    corner = _corner_with("A", red=True)
+    assert w.save(corner, RANK_TO_INT["A"], SUIT_TO_INT["h"], "H0") is True
+    labels = json.load(open(tmp_path / "labels.json"))
+    (key, val), = labels.items()
+    assert val == {"rank": "A", "suit": "hearts"} and key.endswith("#H0")
+    assert len(list(tmp_path.glob("*_H0.png"))) == 1
+    assert w.save(corner, RANK_TO_INT["A"], SUIT_TO_INT["h"], "H0") is False   # dedup
+    # a fresh writer loads the saved label and dedups a near-identical corner
+    w2 = PC.TrainingWriter(str(tmp_path))
+    assert len(w2.labels) == 1
+    assert w2.save(corner, RANK_TO_INT["A"], SUIT_TO_INT["h"], "H0") is False

@@ -78,8 +78,16 @@ deliberately **advisory, not authoritative** — measured on the labeled corners
   exact within-colour suit ≈ weak — i.e. expect to correct roughly half of hands.
 
 That's still a win: a seeded guess is never worse than typing (right → zero
-keystrokes, wrong → type as before). To improve it, grow the exemplar library by
-labeling more captures (`label --poker`); the rank ceiling is ~75-80% (above).
+keystrokes, wrong → type as before).
+
+**It learns from your corrections** (`TrainingWriter`, on by default; `--no-learn`
+to disable). Confirming a hand (bare Enter) or correcting it (typing) saves each
+face-up card's corner with its now-known label into `data/poker_cards` — the same
+crop+`labels.json` format `label --poker` produces — and hot-adds it to the live
+reader so detection improves immediately, and more on the next launch. Typed
+board cards are captured too. Crops are deduped against the existing library, so
+confirming a static hand repeatedly doesn't flood it. This turns ordinary play
+into labeling: the more you use it, the closer rank gets to its ~75-80% ceiling.
 
 That's a genuinely useful poker assistant that sidesteps the one thing the screen
 won't give us. **Built** (`app/live.py poker`):
