@@ -1,6 +1,6 @@
 from judgment_assist.cards import parse_cards
 from judgment_assist.poker.equity import equity
-from judgment_assist.poker.advisor import advise
+from judgment_assist.poker.advisor import advise, decide
 
 
 def test_pocket_aces_heads_up():
@@ -36,3 +36,14 @@ def test_advisor_raises_strong_hand():
     out = advise(parse_cards("Ah As"), opponents=1, to_call=10, pot=100,
                  iters=4000, seed=5)
     assert out["recommendation"] == "raise"
+
+
+def test_decide_reuses_cached_equity():
+    # the live loop's path: compute equity once, then re-decide as the price moves
+    eq = equity(parse_cards("Ah Ks"), board=parse_cards("Ah 7c 2d"),
+                opponents=1, iters=4000, seed=6)
+    cheap = decide(eq, to_call=10, pot=200)        # great odds -> commit
+    pricey = decide(eq, to_call=400, pot=20)        # terrible odds, same hand
+    assert cheap["recommendation"] in ("call", "raise")
+    assert pricey["recommendation"] == "fold"
+    assert cheap["equity"] == eq["equity"]          # equity carried through, not recomputed

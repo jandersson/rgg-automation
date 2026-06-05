@@ -15,11 +15,19 @@ def advise(hero, board=(), opponents=1, to_call=0, pot=0, iters=20000,
     costs to ``to_call``. With ``to_call == 0`` we're choosing whether to bet.
     """
     eq = equity(hero, board, opponents, iters, seed)
+    if len(board) >= 3:
+        eq["made_hand"] = category_name(evaluate7(hero + list(board)))
+    return decide(eq, to_call=to_call, pot=pot, raise_margin=raise_margin)
+
+
+def decide(eq, to_call=0, pot=0, raise_margin=0.12):
+    """Turn a precomputed ``equity`` dict into a betting recommendation.
+
+    Split out from :func:`advise` so a live loop can compute the expensive
+    Monte-Carlo equity once (it only depends on the cards) and refresh the cheap
+    pot-odds decision every frame as ``to_call``/``pot`` change."""
     e = eq["equity"]
     out = dict(eq)
-
-    if len(board) >= 3:
-        out["made_hand"] = category_name(evaluate7(hero + list(board)))
 
     if to_call > 0:
         pot_odds = to_call / (pot + to_call)
