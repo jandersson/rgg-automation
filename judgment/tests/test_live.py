@@ -305,6 +305,16 @@ def test_poker_advisor_confirm_saves_detected_hand():
     assert len(cr.added) == 2                 # hot-added to the live reader too
 
 
+def test_confirm_banks_detected_board_too():
+    cr, w = _FakeCardReader(_det("Ac", "Kd"), _seq("Qh", "7c", "2d")), _RecWriter()
+    pa = PokerAdvisor(_FakeReader({"pot": 40, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
+                      _poker_cfg(), iters=2000, card_reader=cr, training=w)
+    pa.text(_frame(3)); pa.text(_frame(3))    # hole + board auto-detected
+    pa.confirm()                              # Enter banks BOTH hole and board
+    slots = [slot for _, slot in w.saved]
+    assert slots == ["H0", "H1", "B0", "B1", "B2"]
+
+
 def test_poker_advisor_captures_typed_board():
     w = _RecWriter()
     pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),

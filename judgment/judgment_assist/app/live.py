@@ -311,14 +311,20 @@ class PokerAdvisor:
         self._capture(self.cfg.get("board", []), self.board, "B")
 
     def confirm(self):
-        """Bare-Enter: accept the current detected hand as correct — lock it and
-        save it as training data (the cases the reader got right)."""
+        """Bare-Enter: accept everything currently shown (hole + board) as correct
+        and bank it as training data — the cases the reader got right. Nothing is
+        saved unless you do this (or correct a card); auto-detected cards are never
+        banked on their own, so the reader is never trained on its own guesses."""
         with self._lock:
-            hole, locked = list(self.hole), self.hole_locked
-            if len(hole) == 2 and not locked:
+            hole, board = list(self.hole), list(self.board)
+            if len(hole) == 2:
                 self.hole_locked = True
-        if len(hole) == 2 and not locked:
+            if board:
+                self._board_fixed = set(range(len(board)))   # verified -> locked
+        if len(hole) == 2:
             self._capture(self.cfg.get("hole", []), hole, "H")
+        if board:
+            self._capture(self.cfg.get("board", []), board, "B")
 
     def clear(self):
         with self._lock:
@@ -665,7 +671,7 @@ def run(a):
         hint = ("Hole + board are auto-detected (verify them). Advice updates live -\n"
                 "just play; click the game window to keep playing. To FIX a card click\n"
                 "the box: hole = As Kd, board = | Qh 7c 2d, one more = + Td, c = clear.\n"
-                "Enter banks a correct hand for training.  Close (or type q) to stop."
+                "Enter banks the shown hand+board as correct (training).  q = quit."
                 ) if a.game == "poker" else ""
         overlay = SuggestionOverlay(x=a.x, y=a.y, input_enabled=(a.game == "poker"),
                                     hint=hint)
