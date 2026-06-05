@@ -302,6 +302,10 @@ class LauncherApp:
 
     def on_launch(self):
         from tkinter import messagebox
+        if any(p.poll() is None for p in self.procs):    # one overlay at a time
+            self.status.configure(text="an overlay is already running - Stop it first",
+                                  foreground="#a00")
+            return
         try:
             argv = build_argv(self._options())
         except ValueError:
@@ -323,10 +327,14 @@ class LauncherApp:
             return                                    # a newer overlay was launched
         code = proc.returncode
         ok = code in (0, None)
+        if code == 3:                                 # OVERLAY_BUSY_EXIT from app.live
+            msg = "an overlay is already running (close the other one)"
+        elif ok:
+            msg = "overlay stopped"
+        else:
+            msg = f"overlay exited early (code {code})"
         try:
-            self.status.configure(
-                text="overlay stopped" if ok else f"overlay exited early (code {code})",
-                foreground="#070" if ok else "#a00")
+            self.status.configure(text=msg, foreground="#070" if ok else "#a00")
         except Exception:
             pass
 
@@ -349,7 +357,7 @@ class LauncherApp:
 _MUTEX_NAME = "rgg-advisor-launcher"
 
 
-def acquire_single_instance():
+def acquire_single_instance(name=_MUTEX_NAME):
     """Return a lock handle, or None if a launcher is already running. Uses a named
     mutex on Windows (no deps); a no-op elsewhere. Keep the returned handle alive
     for the process lifetime — the OS frees the mutex when the process exits."""
@@ -357,7 +365,7 @@ def acquire_single_instance():
         return True
     import ctypes
     k = ctypes.windll.kernel32
-    handle = k.CreateMutexW(None, False, _MUTEX_NAME)
+    handle = k.CreateMutexW(None, False, name)
     if k.GetLastError() == 183:        # ERROR_ALREADY_EXISTS -> another instance
         if handle:
             k.CloseHandle(handle)

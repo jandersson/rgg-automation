@@ -20,9 +20,10 @@ def test_single_instance_lock():
     if os.name != "nt":
         pytest.skip("named-mutex lock is Windows-only")
     from judgment_assist.app.launcher import acquire_single_instance
-    first = acquire_single_instance()
+    name = "rgg-test-launcher-lock"               # unique name -> isolated from a real launcher
+    first = acquire_single_instance(name)
     assert first                                  # got the lock
-    assert acquire_single_instance() is None       # a second launcher is refused
+    assert acquire_single_instance(name) is None   # a second launcher is refused
 
 
 def test_terminate_all_kills_running_only():

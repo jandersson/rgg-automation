@@ -522,6 +522,26 @@ def _screen_dimmed(frame, thresh=50):
     return float(frame.mean()) < thresh
 
 
+_OVERLAY_MUTEX = "rgg-advisor-overlay"
+OVERLAY_BUSY_EXIT = 3      # exit code when another overlay already holds the lock
+
+
+def acquire_overlay_lock(name=_OVERLAY_MUTEX):
+    """One advisor at a time: a handle, or None if an overlay is already running.
+    Windows named mutex (no deps); no-op elsewhere. Keep the handle for the
+    process lifetime — the OS frees it on exit."""
+    if os.name != "nt":
+        return True
+    import ctypes
+    k = ctypes.windll.kernel32
+    handle = k.CreateMutexW(None, False, name)
+    if k.GetLastError() == 183:        # ERROR_ALREADY_EXISTS
+        if handle:
+            k.CloseHandle(handle)
+        return None
+    return handle
+
+
 # Key names -> Win32 virtual-key codes for the global confirm hotkey. F13-F24 are
 # ideal: games never use them, and a Steam controller back paddle can be mapped to
 # one in Steam's controller config. A few other safe keys are included too.
@@ -553,6 +573,10 @@ def _key_poller(root, vk, on_press, interval_ms=60):
 
 
 def run(a):
+    _overlay_lock = acquire_overlay_lock()         # keep alive for the whole session
+    if _overlay_lock is None:
+        print("another overlay is already running - stop it first")
+        raise SystemExit(OVERLAY_BUSY_EXIT)
     cfg = load_config(a.config)
     # blackjack reads the HUD "Total" badges (config section 'hud'); poker reads
     # cards (section 'poker').
