@@ -150,7 +150,9 @@ class LauncherApp:
         gf.grid(row=0, column=0, sticky="ew", **pad)
         for i, g in enumerate(("poker", "blackjack")):
             ttk.Radiobutton(gf, text=g.capitalize(), value=g,
-                            variable=self.v["game"]).grid(row=0, column=i, **pad)
+                            variable=self.v["game"]).grid(row=0, column=i, sticky="w", **pad)
+        self._help(gf, 1, "Poker = Hold'em equity + pot-odds.   Blackjack = basic-strategy advice.",
+                   colspan=3)
 
         # where the advice appears
         ov = ttk.LabelFrame(root, text="Where to show the advice")
@@ -165,26 +167,36 @@ class LauncherApp:
         ttk.Label(ov, text="down  (pixels from the top-left)").grid(row=2, column=4, sticky="w", **pad)
         self._help(ov, 3, "Or just drag the box to where you want it once it opens.")
 
-        # poker box
-        self.pf = ttk.LabelFrame(root, text="Poker")
+        # poker options
+        self.pf = ttk.LabelFrame(root, text="Poker options")
         self.pf.grid(row=2, column=0, sticky="ew", **pad)
-        ttk.Checkbutton(self.pf, text="Auto-detect hole cards (correct by typing)",
+        ttk.Checkbutton(self.pf, text="Auto-detect my hole cards",
                         variable=self.v["detect"]).grid(row=0, column=0, columnspan=4, sticky="w", **pad)
-        ttk.Checkbutton(self.pf, text="Learn: save confirmed/corrected cards as training data",
-                        variable=self.v["learn"]).grid(row=1, column=0, columnspan=4, sticky="w", **pad)
-        self._row(self.pf, 2, "Opponents (fallback)", "opp", 6, "Equity iters", "iters", 8)
+        self._help(self.pf, 1, "Reads your 2 cards; press Enter to confirm or type to fix a wrong one.")
+        ttk.Checkbutton(self.pf, text="Learn from my corrections",
+                        variable=self.v["learn"]).grid(row=2, column=0, columnspan=4, sticky="w", **pad)
+        self._help(self.pf, 3, "Each confirmed/corrected hand is saved so detection keeps improving.")
+        ttk.Label(self.pf, text="Opponents at the table").grid(row=4, column=0, sticky="w", **pad)
+        ttk.Entry(self.pf, textvariable=self.v["opp"], width=5).grid(row=4, column=1, sticky="w")
+        self._help(self.pf, 5, "Fallback only - used when it can't count the active players itself.")
+        ttk.Label(self.pf, text="Odds calc accuracy").grid(row=6, column=0, sticky="w", **pad)
+        ttk.Entry(self.pf, textvariable=self.v["iters"], width=8).grid(row=6, column=1, sticky="w")
+        self._help(self.pf, 7, "Higher = steadier odds, a little slower (default 12000).")
 
-        # blackjack box
-        self.bf = ttk.LabelFrame(root, text="Blackjack")
+        # blackjack options
+        self.bf = ttk.LabelFrame(root, text="Blackjack options")
         self.bf.grid(row=3, column=0, sticky="ew", **pad)
-        ttk.Label(self.bf, text="Decks").grid(row=0, column=0, sticky="w", **pad)
-        ttk.Entry(self.bf, textvariable=self.v["decks"], width=6).grid(row=0, column=1, sticky="w", **pad)
-        ttk.Checkbutton(self.bf, text="Hi-Lo counting (experimental)",
+        ttk.Label(self.bf, text="Decks in the shoe").grid(row=0, column=0, sticky="w", **pad)
+        ttk.Entry(self.bf, textvariable=self.v["decks"], width=5).grid(row=0, column=1, sticky="w", **pad)
+        ttk.Checkbutton(self.bf, text="Hi-Lo card counting",
                         variable=self.v["count"]).grid(row=1, column=0, columnspan=4, sticky="w", **pad)
-        ttk.Checkbutton(self.bf, text="Session DB logging",
-                        variable=self.v["db"]).grid(row=2, column=0, columnspan=4, sticky="w", **pad)
-        ttk.Label(self.bf, text="Log CSV (optional)").grid(row=3, column=0, sticky="w", **pad)
-        ttk.Entry(self.bf, textvariable=self.v["log"], width=28).grid(row=3, column=1, columnspan=3, sticky="ew", **pad)
+        self._help(self.bf, 2, "Experimental - multi-seat table, the count can't see most cards (off by default).")
+        ttk.Checkbutton(self.bf, text="Save each hand to a database",
+                        variable=self.v["db"]).grid(row=3, column=0, columnspan=4, sticky="w", **pad)
+        self._help(self.bf, 4, "Logs results to data/sessions for later review.")
+        ttk.Label(self.bf, text="Also write a CSV log").grid(row=5, column=0, sticky="w", **pad)
+        ttk.Entry(self.bf, textvariable=self.v["log"], width=22).grid(row=5, column=1, columnspan=2, sticky="ew", **pad)
+        self._help(self.bf, 6, "Optional - leave blank to skip; e.g. hands.csv.")
 
         # advanced / rarely-changed settings
         adv = ttk.LabelFrame(root, text="Advanced (defaults are usually fine)")
@@ -236,12 +248,6 @@ class LauncherApp:
             except ValueError:
                 pass
             self.v["config"].set(p)
-
-    def _row(self, parent, r, l1, k1, w1, l2, k2, w2):
-        self.ttk.Label(parent, text=l1).grid(row=r, column=0, sticky="w", padx=8, pady=3)
-        self.ttk.Entry(parent, textvariable=self.v[k1], width=w1).grid(row=r, column=1, sticky="w", padx=8, pady=3)
-        self.ttk.Label(parent, text=l2).grid(row=r, column=2, sticky="w", padx=8, pady=3)
-        self.ttk.Entry(parent, textvariable=self.v[k2], width=w2).grid(row=r, column=3, sticky="w", padx=8, pady=3)
 
     def _toggle(self):
         """Show only the selected game's options."""
