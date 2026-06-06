@@ -665,24 +665,30 @@ class LauncherApp:
             return
         adv = s["advisor"]
         hole, board = list(adv.hole), list(adv.board)
+        # Board slots are editable up to the number of community cards ON SCREEN, not
+        # just the ones detection filled — so a slot the reader can't read is still
+        # correctable (that un-sticks "reading the board"). Hole stays gated on a
+        # detected card.
+        screen_board = getattr(adv, "screen_board", 0)
         for i, cell in enumerate(self._cells):
             if cell["kind"] == "H":
                 card = hole[cell["idx"]] if cell["idx"] < len(hole) else None
                 fixed = adv.hole_locked
+                editable = card is not None
             else:
                 card = board[cell["idx"]] if cell["idx"] < len(board) else None
                 fixed = cell["idx"] in adv._board_fixed
-            present = card is not None
-            cell["rc"].configure(state="readonly" if present else "disabled")
-            cell["sc"].configure(state="readonly" if present else "disabled")
-            if present and not fixed:        # reflect detection (don't fight a typed fix)
+                editable = cell["idx"] < max(len(board), screen_board)
+            cell["rc"].configure(state="readonly" if editable else "disabled")
+            cell["sc"].configure(state="readonly" if editable else "disabled")
+            if card is not None and not fixed:   # reflect detection (don't fight a typed fix)
                 cell["rank"].set(INT_TO_RANK[card[0]])
                 cell["suit"].set(INT_TO_SUIT[card[1]])
-            elif not present:
-                cell["rank"].set("")
-                cell["suit"].set("")
+            elif not editable:                   # empty + not on screen -> clear; an
+                cell["rank"].set("")             # editable-but-empty slot is the user's
+                cell["suit"].set("")             # to fill, so leave it alone
             lab = ("H" if cell["kind"] == "H" else "B") + str(cell["idx"] + 1)
-            txt = (INT_TO_RANK[card[0]] + INT_TO_SUIT[card[1]]) if present else "-"
+            txt = (INT_TO_RANK[card[0]] + INT_TO_SUIT[card[1]]) if card is not None else "-"
             self._slotbtns[i].configure(text=f"{lab}:{txt}")
 
     # -------------------------------------------------------- Labels tab -------

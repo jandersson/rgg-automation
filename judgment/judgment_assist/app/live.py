@@ -305,6 +305,9 @@ class PokerAdvisor:
         self._board_fixed = set()         # board slots the hero typed (don't auto-overwrite)
         self._board_cand, self._board_cand_n = None, 0   # board stability filter
         self._board_wait = 0              # frames the board read hasn't stabilised
+        self.screen_board = 0             # community cards visible on screen (for the
+                                          # corrections panel: a slot the reader can't
+                                          # fill is still on screen + correctable)
         self._good_frame = None           # last LIVE (cards-present) frame, for capture
         self._key = self._eq = None
         self.banked = []                  # review log: every new exemplar written
@@ -442,9 +445,12 @@ class PokerAdvisor:
         same cards reappear (which must NOT wipe a typed correction: pausing dims
         the screen so cards read as 'absent', and naive logic mistook resume for a
         new deal). Board slots fill in as community cards appear; a typed board card
-        is held (the physical card can't change once dealt)."""
-        if not present:
-            return
+        is held (the physical card can't change once dealt).
+
+        Hole and board are read INDEPENDENTLY: the hole only when both hole cards are
+        present (so a pause can't fake a new deal), but the board ALWAYS — a momentary
+        occlusion of a hole corner (a tooltip, an animation) must not freeze
+        community-card detection, which is what left it stuck on 'reading the board'."""
         from ..vision.poker_cards import whole_roi
         from ..vision.poker import board_count
 
@@ -452,12 +458,28 @@ class PokerAdvisor:
             l, t, w, h = whole_roi((x, y), slot)
             return self.card_reader.recognize(frame[t:t + h, l:l + w], kind=slot[0])
 
-        hreads = [recog(f"H{i}", x, y) for i, (x, y) in enumerate(self.cfg["hole"])]
-        hdet = tuple(card for card, _ in hreads)
-        self._cand_n = self._cand_n + 1 if hdet == self._cand else 1
-        self._cand = hdet
-        hole_stable = self._cand_n >= 2
+        # -- hole: only when both hole cards are present --
+        if present:
+            hreads = [recog(f"H{i}", x, y) for i, (x, y) in enumerate(self.cfg["hole"])]
+            hdet = tuple(card for card, _ in hreads)
+            self._cand_n = self._cand_n + 1 if hdet == self._cand else 1
+            self._cand = hdet
+            if self._cand_n >= 2:                      # hole read stable
+                hinfo = [inf for _, inf in hreads]
+                with self._lock:
+                    new_hand = self._locked_screen is not None and hdet != self._locked_screen
+                    if not self.hole_locked:
+                        if new_hand:                  # auto mode: fresh deal -> reset board
+                            self.board, self._board_fixed = [], set()
+                        self.hole, self._info, self._locked_screen = list(hdet), hinfo, hdet
+                    elif new_hand and self._cand_n >= 3:
+                        # a typed correction is held until the physical cards really
+                        # change (3 stable frames of a different read) -> a new hand.
+                        self.hole_locked = False
+                        self.board, self._board_fixed = [], set()
+                        self.hole, self._info, self._locked_screen = list(hdet), hinfo, hdet
 
+        # -- board: always, independent of the hole (see docstring) --
         nb = board_count(frame, self.cfg)
         bdet = tuple(recog(f"B{i}", *self.cfg["board"][i])[0] for i in range(nb))
         # Stability over only the slots we'd actually fill (non-fixed): a flickering
@@ -472,22 +494,8 @@ class PokerAdvisor:
         self._board_wait = 0 if board_stable else self._board_wait + 1
         if self._board_wait >= 5:
             board_stable, self._board_wait = True, 0
-
-        with self._lock:
-            if hole_stable:
-                hinfo = [inf for _, inf in hreads]
-                new_hand = self._locked_screen is not None and hdet != self._locked_screen
-                if not self.hole_locked:
-                    if new_hand:                      # auto mode: fresh deal -> reset board
-                        self.board, self._board_fixed = [], set()
-                    self.hole, self._info, self._locked_screen = list(hdet), hinfo, hdet
-                elif new_hand and self._cand_n >= 3:
-                    # a typed correction is held until the physical cards really
-                    # change (3 stable frames of a different read) -> a new hand.
-                    self.hole_locked = False
-                    self.board, self._board_fixed = [], set()
-                    self.hole, self._info, self._locked_screen = list(hdet), hinfo, hdet
-            if board_stable:
+        if board_stable:
+            with self._lock:
                 if nb == 0:
                     self.board, self._board_fixed = [], set()
                 else:                                 # fill non-typed slots; grow as dealt
@@ -532,6 +540,7 @@ class PokerAdvisor:
         # the cards (equity needs their identities, which can't be read).
         streets = {0: "preflop", 3: "flop", 4: "turn", 5: "river"}
         screen_nb, typed_nb = st["board"], len(board)
+        self.screen_board = screen_nb      # for the corrections panel (enable visible slots)
         behind = typed_nb < screen_nb
         nb = screen_nb if behind else typed_nb
         stage = streets.get(nb, f"{nb} cards")

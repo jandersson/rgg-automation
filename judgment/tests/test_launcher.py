@@ -331,6 +331,26 @@ def test_reviewed_count_and_hide_filter(tmp_path):
         root.destroy()
 
 
+def test_corrections_enable_board_slots_on_screen():
+    # un-sticks "reading the board": a board slot that's ON SCREEN must be correctable
+    # even if detection couldn't fill it (here 3 on screen, only 1 detected).
+    root, app = _gui()
+    try:
+        adv = type("A", (), {})()
+        adv.hole, adv.board = [], [(14, 0)]           # 1 detected board card
+        adv._board_fixed, adv.hole_locked = set(), False
+        adv.screen_board = 3                          # but 3 community cards on screen
+        app._sess = {"advisor": adv}
+        app._refresh_corrections()
+        st = {(c["kind"], c["idx"]): str(c["rc"].cget("state")) for c in app._cells}
+        assert st[("B", 0)] == "readonly" and st[("B", 2)] == "readonly"   # on screen
+        assert st[("B", 3)] == "disabled"             # not on screen
+        assert st[("H", 0)] == "disabled"             # no hole card -> not editable
+    finally:
+        app._sess = None
+        root.destroy()
+
+
 def test_confirm_key_dispatches_by_active_tab(tmp_path):
     import pytest
     pytest.importorskip("cv2")

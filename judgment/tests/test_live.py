@@ -284,8 +284,8 @@ class _FakeCardReader:
             r = self.hole[self.h % len(self.hole)]
             self.h += 1
             return r
-        r = self.board[self.b]
-        self.b += 1
+        r = self.board[self.b % len(self.board)]   # modulo: survives board-only frames
+        self.b += 1                                  # (hole skipped -> b isn't reset)
         return r
 
     def add_exemplar(self, corner_bgr, rank, suit):
@@ -408,6 +408,19 @@ def test_poker_advisor_autodetects_board():
     pa.text(f); pa.text(f)                    # stabilise
     assert cards_str(pa.hole) == "Ac Kd"
     assert cards_str(pa.board) == "Qh 7c 2d"  # board auto-detected too
+
+
+def test_board_detects_when_hole_occluded():
+    # the stuck-"reading the board" bug: a hole corner is occluded (a tooltip /
+    # animation) so the hole reads as ABSENT, but the board must still update — it
+    # used to be gated on hole presence and froze entirely.
+    cr = _FakeCardReader(_det("Ac", "Kd"), _seq("Qh", "7c", "2d"))
+    pa = PokerAdvisor(_FakeReader({"pot": 40, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
+                      _poker_cfg(), iters=2000, card_reader=cr)
+    f = _frame(3, hole=False)                 # board on screen, hole corners dark
+    pa.text(f); pa.text(f)
+    assert cards_str(pa.board) == "Qh 7c 2d"  # board read despite the hole being absent
+    assert pa.hole == []                      # and the dark hole corners weren't read
 
 
 def test_typed_board_card_held_while_new_card_autodetects():
