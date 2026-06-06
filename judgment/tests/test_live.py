@@ -313,7 +313,9 @@ def test_poker_advisor_autodetects_hole_then_locks_on_override():
     assert pa.hole == []
     txt = pa.text(f)                         # 2nd identical frame: accept the guess
     assert cards_str(pa.hole) == "Ac Kd" and not pa.hole_locked
-    assert "(detected black/red - type to fix)" in txt
+    # an unconfirmed guess is flagged for confirm-or-fix — no redundant colour, which
+    # the colour-gated suit already implies and which read like "fix the colour".
+    assert "auto-detected" in txt and "colour" not in txt.lower()
     pa.set_hole(parse_cards("Ah Kh"))        # hero corrects -> locks, detection stops
     pa.text(f)
     assert cards_str(pa.hole) == "Ah Kh" and pa.hole_locked

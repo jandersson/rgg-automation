@@ -518,7 +518,7 @@ class PokerAdvisor:
             self._detect(frame, present)
         with self._lock:
             hole, board = list(self.hole), list(self.board)
-            locked, info = self.hole_locked, self._info
+            locked = self.hole_locked
             board_fixed = set(self._board_fixed)
 
         st = P.table_state(frame, self.cfg, self.reader)
@@ -550,12 +550,12 @@ class PokerAdvisor:
             return f"poker: duplicate card in {cards_str(hole)} / {cards_str(board)}\n" + live
         if opp < 1:
             return f"YOU {cards_str(hole)} - all opponents folded, pot is yours\n" + live
-        # A detected (not yet confirmed) hole is a guess — flag it and show the
-        # reliable colour so the hero can correct rank/suit at a glance.
-        tag = ""
-        if not locked:
-            cols = "/".join(i["color"] for i in info) if info else ""
-            tag = f"  (detected {cols} - type to fix)"
+        # A detected (not yet confirmed) hole is a guess shown for the hero to accept
+        # or fix. We deliberately DON'T print the detected colour: the suit is
+        # colour-gated (its colour always matches the shown suit), so it added no
+        # information and made "type to fix" look like it meant fix the *colour*.
+        # When the read is right, just confirm — nothing to type.
+        tag = "  (auto-detected - confirm if right, else correct it)" if not locked else ""
         if behind:
             # board moved on but we don't have the new cards yet. With auto-detect
             # they'll fill in a frame or two; without it, the hero must type them.
@@ -568,7 +568,7 @@ class PokerAdvisor:
                     f"{live}\n"
                     f">>> type the {screen_nb} board cards for {stage} odds   e.g. | Qh 7c 2d")
         # flag an auto-detected board (any slot not typed) so the hero verifies it
-        btag = "  (detected - type to fix)" if board and any(
+        btag = "  (auto-detected - confirm if right, else correct it)" if board and any(
             i not in board_fixed for i in range(len(board))) else ""
         out = poker_decide(self._equity(hole, board, opp), to_call=to_call, pot=pot)
         made = f"  [{out['made_hand']}]" if "made_hand" in out else ""
