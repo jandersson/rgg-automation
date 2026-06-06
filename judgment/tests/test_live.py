@@ -493,16 +493,17 @@ def test_rects_overlap_basic():
     assert not _rects_overlap((0, 0, 10, 10), (0, 20, 10, 10))
 
 
-def test_overlay_default_position_blocks_seat0_bet():
-    # The actual bug: overlay at (40,40) with its rendered POT line ~520x180 reaches
-    # x>=422,y in 120-166 -> sits on opp_bet[0], which then reads None.
+def test_overlay_at_top_left_blocks_seat0_bet():
+    # The original bug + former default: overlay at (40,40) with its rendered POT
+    # line ~520x180 reaches x>=422, y in 120-166 -> sits on opp_bet[0], None read.
     hits = overlay_blocked_rois((40, 40, 520, 180), _POKER_ROI)
     assert hits == ["opp_bet[0]"]
 
 
-def test_overlay_clear_of_all_rois():
-    # Dragged down into the felt band between the board and the hole cards.
-    assert overlay_blocked_rois((40, 440, 520, 160), _POKER_ROI) == []
+def test_new_default_position_clear_of_all_rois():
+    # The (40,460) default lands in the felt band below the board and left of the
+    # hole cards (x<652) -> clear of every reader ROI even at full overlay height.
+    assert overlay_blocked_rois((40, 460, 520, 200), _POKER_ROI) == []
 
 
 def test_overlay_blocks_pot_plate():

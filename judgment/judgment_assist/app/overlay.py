@@ -13,7 +13,7 @@ from __future__ import annotations
 
 
 class SuggestionOverlay:
-    def __init__(self, x=40, y=40, alpha=0.92, font_size=18,
+    def __init__(self, x=40, y=460, alpha=0.92, font_size=18,
                  input_enabled=False, hint="", on_submit=None, master=None):
         import tkinter as tk
         self._tk = tk

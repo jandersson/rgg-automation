@@ -30,7 +30,8 @@ DEFAULTS = {
     "interval": 0.7,
     "min_confidence": 0.6,
     "x": 40,
-    "y": 40,
+    "y": 460,               # clear of every poker reader ROI; (40,40) sat on
+                            # opp_bet[0] and made the reader read the overlay itself
     "overlay": True,        # False -> --no-overlay (console only)
     # poker
     "detect": True,         # False -> --no-detect

@@ -949,7 +949,9 @@ def main(argv=None):
     p.add_argument("--min-confidence", dest="min_confidence", type=float, default=0.6)
     p.add_argument("--no-overlay", action="store_true", help="print to console instead")
     p.add_argument("--x", type=int, default=40)
-    p.add_argument("--y", type=int, default=40)
+    # y=460 keeps the box in the felt band below the board and left of the hole
+    # cards, clear of every reader ROI; (40,40) sat on opp_bet[0] (pot undercount).
+    p.add_argument("--y", type=int, default=460)
     # blackjack counting
     p.add_argument("--decks", type=int, default=6, help="shoe size for true-count scaling")
     p.add_argument("--results", default="data/results",
