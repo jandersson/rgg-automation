@@ -292,8 +292,30 @@ class LauncherApp:
         self.v["game"].trace_add("write", lambda *_: self._toggle())
         self.corr_mode.trace_add("write", lambda *_: self._show_corr_mode())
         root.protocol("WM_DELETE_WINDOW", self.on_quit)   # X button closes overlays too
+        self._install_confirm_hotkey(DEFAULTS["confirm_key"])   # paddle works for review too
         self._toggle()
         self._refresh()
+
+    def _install_confirm_hotkey(self, confirm_key):
+        """Poll the global confirm key (e.g. an R4 paddle mapped to Insert) for the
+        launcher's life. Installed once; reused across sessions (the _pollers guard
+        stops duplicates). Windows-only."""
+        if os.name != "nt" or not confirm_key:
+            return
+        from .live import _key_poller, _VK
+        vk = _VK.get(str(confirm_key).lower())
+        if vk is not None and vk not in self._pollers:
+            self._pollers.add(vk)
+            _key_poller(self.root, vk, self._on_confirm_key)
+
+    def _on_confirm_key(self):
+        """The confirm hotkey acts on the tab you're viewing: confirm the poker hand
+        on the Play tab, or mark-reviewed + jump to the next crop on the Labels tab."""
+        try:
+            on_labels = str(self.nb.select()) == str(self.tab_labels)
+        except Exception:                              # noqa: BLE001
+            on_labels = False
+        (self._confirm_and_next if on_labels else self._confirm_hotkey)()
 
     def _help(self, parent, row, text, col=0, colspan=5):
         """A small grey hint line under a control."""
@@ -466,7 +488,7 @@ class LauncherApp:
             vk = _VK.get(o["confirm_key"].lower())
             if vk and vk not in self._pollers:       # one poller per key, reused across sessions
                 self._pollers.add(vk)
-                _key_poller(self.root, vk, self._confirm_hotkey)
+                _key_poller(self.root, vk, self._on_confirm_key)
         self.cf2.grid(row=self._corr_row, column=0, sticky="ew", padx=8, pady=3)
         self._show_corr_mode()
         self.status.configure(text="overlay running (corrections below)", foreground="#070")
@@ -709,7 +731,7 @@ class LauncherApp:
         self._sort_var.trace_add("write", lambda *_: self._reload_labels_list())
         ttk.Button(row2, text="Next unreviewed →", command=self._select_next_unreviewed
                    ).grid(row=0, column=2, padx=10)
-        ttk.Label(row2, text="(Enter on a row = confirm correct + jump to next)",
+        ttk.Label(row2, text="(Enter / Space / your R4 button = mark reviewed + next)",
                   foreground="#888", font=("Segoe UI", 8)).grid(row=0, column=3)
 
         cols = ("when", "source", "slot", "label", "ok")
@@ -723,7 +745,8 @@ class LauncherApp:
         sb.grid(row=1, column=1, sticky="ns")
         self.labels_tree.configure(yscrollcommand=sb.set)
         self.labels_tree.bind("<<TreeviewSelect>>", lambda e: self._show_label_crop())
-        self.labels_tree.bind("<Return>", lambda e: self._confirm_and_next())
+        for seq in ("<Return>", "<space>"):           # keyboard sweep keys
+            self.labels_tree.bind(seq, lambda e: (self._confirm_and_next(), "break")[1])
 
         mid = ttk.Frame(parent)
         mid.grid(row=2, column=0, columnspan=2, sticky="ew", pady=4)

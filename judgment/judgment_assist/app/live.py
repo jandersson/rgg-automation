@@ -630,7 +630,10 @@ def _key_poller(root, vk, on_press, interval_ms=60):
             was_down[0] = down
         except Exception:
             pass
-        root.after(interval_ms, poll)
+        try:
+            root.after(interval_ms, poll)
+        except Exception:
+            pass                                # window gone (closed) -> stop polling
 
     root.after(interval_ms, poll)
 

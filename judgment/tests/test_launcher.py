@@ -331,6 +331,24 @@ def test_reviewed_count_and_hide_filter(tmp_path):
         root.destroy()
 
 
+def test_confirm_key_dispatches_by_active_tab(tmp_path):
+    import pytest
+    pytest.importorskip("cv2")
+    root, app = _gui()
+    try:
+        _temp_lib(app, tmp_path)
+        calls = []
+        app._confirm_and_next = lambda: calls.append("labels")
+        app._confirm_hotkey = lambda: calls.append("play")
+        app.nb.select(app.tab_labels)
+        app._on_confirm_key()                  # on Labels -> mark reviewed + next
+        app.nb.select(app.tab_play)
+        app._on_confirm_key()                  # on Play -> confirm the hand
+        assert calls == ["labels", "play"]
+    finally:
+        root.destroy()
+
+
 def test_save_unchanged_label_confirms_without_refit(tmp_path):
     """Saving an already-correct label marks it reviewed but skips the (pointless)
     detector refit; changing the label does refit."""
