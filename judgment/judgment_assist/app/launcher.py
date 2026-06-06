@@ -699,6 +699,18 @@ class LauncherApp:
                         command=self._reload_labels_list).grid(row=1, column=2, padx=4)
         self._labels_count = ttk.Label(top, text="", foreground="#070")
         self._labels_count.grid(row=1, column=3, padx=8, sticky="w")
+        row2 = ttk.Frame(top)
+        row2.grid(row=2, column=0, columnspan=5, sticky="w", pady=(2, 0))
+        ttk.Label(row2, text="Sort:").grid(row=0, column=0)
+        self._sort_var = tk.StringVar(value="Newest")
+        ttk.Combobox(row2, values=["Newest", "By label", "By slot", "Hard cases first"],
+                     textvariable=self._sort_var, width=15, state="readonly"
+                     ).grid(row=0, column=1, padx=4)
+        self._sort_var.trace_add("write", lambda *_: self._reload_labels_list())
+        ttk.Button(row2, text="Next unreviewed →", command=self._select_next_unreviewed
+                   ).grid(row=0, column=2, padx=10)
+        ttk.Label(row2, text="(Enter on a row = confirm correct + jump to next)",
+                  foreground="#888", font=("Segoe UI", 8)).grid(row=0, column=3)
 
         cols = ("when", "source", "slot", "label", "ok")
         self.labels_tree = ttk.Treeview(parent, columns=cols, show="headings", height=11)
@@ -711,6 +723,7 @@ class LauncherApp:
         sb.grid(row=1, column=1, sticky="ns")
         self.labels_tree.configure(yscrollcommand=sb.set)
         self.labels_tree.bind("<<TreeviewSelect>>", lambda e: self._show_label_crop())
+        self.labels_tree.bind("<Return>", lambda e: self._confirm_and_next())
 
         mid = ttk.Frame(parent)
         mid.grid(row=2, column=0, columnspan=2, sticky="ew", pady=4)
@@ -756,6 +769,7 @@ class LauncherApp:
         self._live_seen = 0
         self._cap_pid, self._cap_seq = os.getpid(), 0    # ids for captured crops
         self._suggest_reader, self._suggest_dirty = None, True   # lazy guess reader
+        self._suspect_list, self._suspects = None, {}    # kNN label-consistency flags
         self._reload_labels_list()
 
     @staticmethod
@@ -790,17 +804,46 @@ class LauncherApp:
         if path and self.labels_tree.exists(path):
             return
         when = datetime.datetime.fromtimestamp(e["mtime"]).strftime("%H:%M:%S")
+        txt = self._label_text(e)
+        if e["key"] in self._suspects:                # flagged by the kNN check
+            txt = "⚠ " + txt
         vals = (when, self._source_of(e["frame"]),
-                self._SLOT_HUMAN.get(e["slot"], e["slot"]), self._label_text(e),
+                self._SLOT_HUMAN.get(e["slot"], e["slot"]), txt,
                 "✓" if e["reviewed"] else "")
         self.labels_tree.insert("", 0 if top else "end", iid=path, values=vals)
         self._labels_path[path] = path
         self._labels_key[path] = e["key"]
 
+    def _ensure_suspects(self):
+        """Compute the kNN label-consistency flags once (cached until the library
+        changes). A flag means 'lookalikes disagree' — a card to double-check, not a
+        verdict; most are correct-but-ambiguous (9 vs T)."""
+        if self._suspect_list is None:
+            try:
+                self._suspect_list = self._lib.suspect_labels()
+            except Exception:                         # noqa: BLE001
+                self._suspect_list = []
+            self._suspects = {s["key"]: s["suggest"] for s in self._suspect_list}
+
+    def _sorted_entries(self, entries):
+        """Order the library list for review per the Sort control."""
+        sort = self._sort_var.get()
+        if sort == "Hard cases first":
+            self._ensure_suspects()
+            order = {s["key"]: i for i, s in enumerate(self._suspect_list)}
+            return sorted(entries, key=lambda e: (order.get(e["key"], 1 << 30), -e["mtime"]))
+        if sort == "By label":                        # twins adjacent -> outliers pop
+            ro = {r: i for i, r in enumerate(self._RANKS)}
+            return sorted(entries, key=lambda e: (0 if e["labeled"] else 1,
+                          ro.get(e["rank"], 99), e["suit"] or "", -e["mtime"]))
+        if sort == "By slot":
+            return sorted(entries, key=lambda e: (e["slot"], -e["mtime"]))
+        return entries                                # Newest (entries() already desc)
+
     def _reload_labels_list(self, select=None):
-        """Rebuild the list from disk (newest first). Counts cover the WHOLE library;
-        'Hide reviewed' only filters what's shown. Cheap enough for a button /
-        post-edit; not run per-frame."""
+        """Rebuild the list from disk in the chosen order. Counts cover the WHOLE
+        library; 'Hide reviewed' only filters what's shown. Cheap enough for a
+        button / post-edit; not run per-frame."""
         self._lib.reload()
         self._suggest_dirty = True                    # library changed -> rebuild guesser
         for it in self.labels_tree.get_children():
@@ -808,13 +851,15 @@ class LauncherApp:
         self._labels_path.clear()
         self._labels_key.clear()
         self._labels_total = self._labels_needs = self._labels_reviewed = 0
-        hide = self._hide_reviewed.get()
-        for e in self._lib.entries():                 # newest first
+        entries = self._lib.entries()
+        for e in entries:
             self._labels_total += 1
             if not e["labeled"] and not e["skip"]:
                 self._labels_needs += 1
             if e["reviewed"]:
                 self._labels_reviewed += 1
+        hide = self._hide_reviewed.get()
+        for e in self._sorted_entries(entries):
             if not (hide and e["reviewed"]):
                 self._labels_row(e, top=False)
         # current session's banks are now in the list; don't let _append re-add them
@@ -853,9 +898,34 @@ class LauncherApp:
             self._update_labels_count()
 
     def _update_labels_count(self):
+        flagged = f" · {len(self._suspects)} flagged" if self._suspects else ""
         self._labels_count.configure(
             text=f"{self._labels_total} crops · {self._labels_needs} need a label · "
-                 f"{self._labels_reviewed} reviewed")
+                 f"{self._labels_reviewed} reviewed{flagged}")
+
+    def _confirm_and_next(self):
+        """Enter on a row: confirm a labeled crop as reviewed (it's correct), then
+        jump to the next unreviewed one — the fast path for sweeping the backlog."""
+        iid, key = self._selected_key()
+        if not key:
+            return
+        if "rank" in self._lib.labels.get(key, {}):
+            self._suspect_list = None
+            self._lib.reload()
+            self._lib.set_reviewed(key)
+            self._sync_writer()
+            self._reload_labels_list()
+        self._select_next_unreviewed()
+
+    def _select_next_unreviewed(self):
+        """Select the first not-yet-reviewed crop currently in view (and preview it)."""
+        for iid in self.labels_tree.get_children():
+            if not self._lib.labels.get(self._labels_key.get(iid), {}).get("reviewed"):
+                self.labels_tree.selection_set(iid)
+                self.labels_tree.see(iid)
+                self._show_label_crop()
+                return
+        self._labels_status("no unreviewed crops in view ✓")
 
     def _show_label_crop(self):
         sel = self.labels_tree.selection()
@@ -881,7 +951,10 @@ class LauncherApp:
         src = lab if "rank" in lab else (lab.get("_guess") or {})
         self._edit_rank.set(src.get("rank", ""))
         self._edit_suit.set(self._SUIT_LETTER.get(src.get("suit", ""), ""))
-        if "rank" not in lab and lab.get("_guess"):
+        if key in self._suspects:
+            self._labels_status(f"⚠ lookalike crops are labelled {self._suspects[key]}"
+                                " — double-check this one")
+        elif "rank" not in lab and lab.get("_guess"):
             g = lab["_guess"]
             self._labels_status(
                 f"detector guess {g['rank']}{self._SUIT_SYM.get(g['suit'], '?')}"
@@ -929,6 +1002,7 @@ class LauncherApp:
         unchanged = (prev.get("rank") == r
                      and self._SUIT_LETTER.get(prev.get("suit", "")) == su)
         self._lib.set_label(key, r, su)
+        self._suspect_list = None                     # labels changed -> recompute flags
         # Saving an unchanged label just confirms it (marks reviewed) — the training
         # set didn't change, so skip the detector refit; only resync the writer.
         self._sync_writer() if unchanged else self._sync_after_edit()
@@ -958,6 +1032,7 @@ class LauncherApp:
             return
         self._lib.reload()
         self._lib.set_skip(key)
+        self._suspect_list = None
         self._sync_after_edit()
         self._reload_labels_list(select=iid)
         self._labels_status(f"marked {key.split('#')[1]} as skip (excluded from training)")
@@ -978,6 +1053,7 @@ class LauncherApp:
             return
         self._lib.reload()
         self._lib.delete(key)
+        self._suspect_list = None
         self._sync_after_edit()
         self._reload_labels_list()
         self._labels_img = None
