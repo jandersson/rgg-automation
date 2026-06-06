@@ -1,10 +1,16 @@
+---
+title: Detection mechanisms
+---
+
 # Detection mechanisms — algorithm notes
 
 Every way this project reads the screen, spelled out at refresher depth:
 the assumed reader has seen image processing and a bit of ML before but
-doesn't remember the specifics. Companion to **POKER.md** (the poker
-track's status) and **ARCHITECTURE.md** (the pipeline); this file is the
-*how the eyes actually work* reference.
+doesn't remember the specifics. Companion to
+[POKER.md](https://github.com/jandersson/rgg-automation/blob/main/judgment/POKER.md)
+(the poker track's status) and
+[ARCHITECTURE.md](https://github.com/jandersson/rgg-automation/blob/main/judgment/ARCHITECTURE.md)
+(the pipeline); this file is the *how the eyes actually work* reference.
 
 The screen-reading splits cleanly into two problems with very different
 difficulty:
@@ -210,11 +216,27 @@ and the naive intuitions were wrong:
 - **Light photometric (brightness/contrast/small shift) — neutral/slight
   help.** This matches the real variation: lighting and sub-pixel ROI
   jitter. It's what tied HOG and what the ResNet trains on.
-- **Occlusion (Cutout / Random-Erasing) — the principled bet.** Blanking
-  random rectangles simulates a banner/tooltip/neighbour covering part of
-  the card — which *is* the live failure mode (POKER.md's "contamination").
-  Unlike geometric aug, it matches the test distribution. (Experiment in
-  progress; results appended below.)
+- **Occlusion (Cutout / Random-Erasing) — the principled bet that didn't
+  pan out (yet).** Blanking random rectangles simulates a banner/tooltip/
+  neighbour covering part of the card — which *is* the live failure mode
+  (POKER.md's "contamination"), so unlike geometric aug it matches the test
+  distribution. Measured (grouped CV, ResNet34, clean vs synthetically
+  banner-occluded test crops):
+
+  | training | clean acc | occluded acc |
+  |---|---|---|
+  | no Cutout | 95.9% | 76.7% |
+  | + Cutout (≤45% blanked) | 79.5% | 75.0% |
+
+  Two things to read off this. **Occlusion really is the weakness** — a
+  clean-trained model drops 96→77% on obscured cards. But **aggressive
+  Cutout backfired**: it *hurt clean* (96→80%) without helping occluded.
+  Over-blanking only ~110 training images degrades the glyph signal the net
+  needs, and a test band that happens to cover the rank index makes the card
+  unreadable *by anyone* (an information ceiling, not a model failure). The
+  fix isn't naive Cutout — it's *mild, banner-shaped* erasing **and real
+  obscured training examples** (deliberately capture them on the live
+  table). Open work.
 
 Corollary: aug strength must match model capacity. The aggressive
 photometric aug that *hurt* the tiny from-scratch net (90→74%) was
