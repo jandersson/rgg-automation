@@ -121,9 +121,10 @@ def test_launcher_has_play_and_review_tabs():
         root.destroy()
 
 
-def test_review_tab_lists_banked_cards_newest_first():
+def test_review_tab_lists_live_banked_cards_newest_first():
     root, app = _gui()
     try:
+        app._clear_review()                        # drop any on-disk history -> isolate
         class _Adv:                                # stands in for a running advisor
             banked = [{"time": "02:55:24", "slot": "H0", "card": "Ac", "path": None},
                       {"time": "02:55:25", "slot": "H1", "card": "Ts", "path": None}]
@@ -131,7 +132,8 @@ def test_review_tab_lists_banked_cards_newest_first():
         app._review_seen = 0
         app._refresh_review()
         rows = [app.review_tree.item(i, "values") for i in app.review_tree.get_children()]
-        assert rows == [("02:55:25", "Hole 2", "Ts"), ("02:55:24", "Hole 1", "Ac")]
+        assert rows == [("Today 02:55", "02:55:25", "Hole 2", "Ts"),
+                        ("Today 02:55", "02:55:24", "Hole 1", "Ac")]   # newest on top
         assert app._review_count.cget("text") == "2 banked"
         app._refresh_review()                      # idempotent: no duplicate rows
         assert len(app.review_tree.get_children()) == 2
@@ -139,4 +141,25 @@ def test_review_tab_lists_banked_cards_newest_first():
         assert app.review_tree.get_children() == ()
     finally:
         app._sess = None
+        root.destroy()
+
+
+def test_review_tab_loads_past_sessions_from_disk():
+    """The tab pre-loads every past session's banked crops from data/poker_cards,
+    not just the running session — that's the whole point of disk-backing it."""
+    import json
+    from judgment_assist.app.launcher import ROOT
+    lp = ROOT / "data" / "poker_cards" / "labels.json"
+    if not lp.exists() or not any(
+            k.startswith("live") for k in json.load(open(lp, encoding="utf-8"))):
+        import pytest
+        pytest.skip("no banked 'live*' history on disk to load")
+    root, app = _gui()
+    try:
+        assert len(app.review_tree.get_children()) > 0     # loaded at build time
+        app._clear_review()
+        assert app.review_tree.get_children() == ()
+        app._load_review_history()                          # Refresh reloads them
+        assert len(app.review_tree.get_children()) > 0
+    finally:
         root.destroy()

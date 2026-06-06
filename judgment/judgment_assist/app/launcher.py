@@ -668,29 +668,31 @@ class LauncherApp:
                    "B2": "Board 3", "B3": "Board 4", "B4": "Board 5"}
 
     def _build_review(self, parent):
-        """The Review tab: every card banked this session (confirmed or corrected),
-        newest first, with a click-to-preview of the actual crop that was learned —
-        so you can spot a wrong label that got saved. List only; the data lives in
-        data/poker_cards."""
+        """The Review tab: every card banked to data/poker_cards across ALL sessions
+        (not just the running one), newest first, grouped by session, with a
+        click-to-preview of the actual crop that was learned — so you can spot a
+        wrong label that got saved. List only; the crops/labels live on disk."""
         tk, ttk = self.tk, self.ttk
         parent.columnconfigure(0, weight=1)
         parent.rowconfigure(1, weight=1)
         top = ttk.Frame(parent)
         top.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=6)
-        ttk.Label(top, text="Cards banked this session (newest first). Click a row to "
-                  "see the crop that was learned and check the label.",
+        ttk.Label(top, text="Cards banked across all sessions (newest first). Click a "
+                  "row to preview the learned crop and check its label.",
                   foreground="#555", font=("Segoe UI", 9), wraplength=460
-                  ).grid(row=0, column=0, columnspan=3, sticky="w")
-        ttk.Button(top, text="Open data folder", command=self._open_cards_dir
+                  ).grid(row=0, column=0, columnspan=4, sticky="w")
+        ttk.Button(top, text="Refresh", command=self._load_review_history
                    ).grid(row=1, column=0, pady=4, sticky="w")
-        ttk.Button(top, text="Clear list", command=self._clear_review
+        ttk.Button(top, text="Open data folder", command=self._open_cards_dir
                    ).grid(row=1, column=1, padx=6)
+        ttk.Button(top, text="Clear list", command=self._clear_review
+                   ).grid(row=1, column=2)
         self._review_count = ttk.Label(top, text="0 banked", foreground="#070")
-        self._review_count.grid(row=1, column=2, padx=8)
+        self._review_count.grid(row=1, column=3, padx=8)
 
-        cols = ("time", "slot", "card")
+        cols = ("session", "when", "slot", "card")
         self.review_tree = ttk.Treeview(parent, columns=cols, show="headings", height=12)
-        for c, w in (("time", 90), ("slot", 90), ("card", 80)):
+        for c, w in (("session", 110), ("when", 80), ("slot", 90), ("card", 70)):
             self.review_tree.heading(c, text=c.capitalize())
             self.review_tree.column(c, width=w, anchor="center")
         self.review_tree.grid(row=1, column=0, sticky="nsew", padx=(8, 0))
@@ -704,12 +706,76 @@ class LauncherApp:
             foreground="#888", compound="top")
         self._review_preview.grid(row=2, column=0, columnspan=2, pady=8)
         self._review_img = None          # keep a ref so tk doesn't GC the PhotoImage
-        self._review_seen = 0            # how many of advisor.banked we've shown
-        self._review_paths = {}          # tree item id -> crop path on disk
+        self._review_seen = 0            # how many of advisor.banked we've shown live
+        self._review_paths = {}          # tree item id (= crop path) -> crop path
+        self._review_sessions = {}       # session pid -> human label, cached
+        self._load_review_history()
+
+    def _session_label(self, ts):
+        """Human session tag from a bank time: 'Today HH:MM', 'Yday HH:MM', or
+        'Mon DD HH:MM'. Rows of one session share it, so the column groups them."""
+        import datetime
+        d = datetime.datetime.fromtimestamp(ts)
+        today = datetime.date.today()
+        if d.date() == today:
+            return f"Today {d:%H:%M}"
+        if d.date() == today - datetime.timedelta(days=1):
+            return f"Yday {d:%H:%M}"
+        return d.strftime("%b %d %H:%M")
+
+    def _add_review_row(self, session, when, slot, card, path, top=True):
+        """Insert one banked-card row, deduped by crop path (so a card already shown
+        live isn't re-added by a disk Refresh). ``top`` puts it at the head."""
+        if path and self.review_tree.exists(path):
+            return
+        sloth = self._SLOT_HUMAN.get(slot, slot)
+        idx = 0 if top else "end"
+        vals = (session, when, sloth, card)
+        item = (self.review_tree.insert("", idx, iid=path, values=vals) if path
+                else self.review_tree.insert("", idx, values=vals))
+        self._review_paths[item] = path
+
+    def _load_review_history(self):
+        """(Re)load every past session's banked crops from data/poker_cards into the
+        tab. Only the play-banked 'live*' crops (sessions) — the 'frame_*' seeds are
+        the original hand-labeled library, not a session. Time comes from the PNG
+        mtime (labels.json has no timestamp). Idempotent: existing rows are skipped."""
+        import datetime
+        import json
+        card_dir = ROOT / "data" / "poker_cards"
+        labels_path = card_dir / "labels.json"
+        if not labels_path.exists():
+            return
+        try:
+            labels = json.load(open(labels_path, encoding="utf-8"))
+        except Exception:                             # noqa: BLE001 - corrupt/locked
+            return
+        suit = {"clubs": "c", "diamonds": "d", "hearts": "h", "spades": "s"}
+        rows = []                                     # (mtime, path, pid, slot, card)
+        for key, lab in labels.items():
+            if lab.get("_skip") or "rank" not in lab:
+                continue
+            frame, slot = key.split("#")
+            if not frame.startswith("live"):          # sessions only, skip seeds
+                continue
+            path = str(card_dir / f"{frame}_{slot}.png")
+            if not os.path.exists(path):
+                continue
+            rows.append((os.path.getmtime(path), path, frame.split("_")[0],
+                         slot, lab["rank"] + suit.get(lab["suit"], "?")))
+        # one label per session (its earliest bank), so the column groups cleanly
+        for pid in {r[2] for r in rows}:
+            self._review_sessions[pid] = self._session_label(
+                min(r[0] for r in rows if r[2] == pid))
+        for mt, path, pid, slot, card in sorted(rows, reverse=True):   # newest first
+            when = datetime.datetime.fromtimestamp(mt).strftime("%H:%M:%S")
+            self._add_review_row(self._review_sessions[pid], when, slot, card,
+                                 path, top=False)      # desc order + append = newest on top
+        self._update_review_count()
 
     def _refresh_review(self):
-        """Pull any newly-banked exemplars from the running advisor into the tab
-        (newest at the top). Cheap: only the new tail is inserted each tick."""
+        """Append the running advisor's newly-banked exemplars (live, at the top).
+        Cheap: only the new tail each tick. Deduped against the disk history by path."""
         s = self._sess
         if not s:
             return
@@ -717,10 +783,16 @@ class LauncherApp:
         while self._review_seen < len(banked):
             b = banked[self._review_seen]
             self._review_seen += 1
-            slot = self._SLOT_HUMAN.get(b["slot"], b["slot"])
-            item = self.review_tree.insert("", 0, values=(b["time"], slot, b["card"]))
-            if b.get("path"):
-                self._review_paths[item] = b["path"]
+            path = b.get("path")
+            pid = os.path.basename(path).split("_")[0] if path else "current"
+            sess = self._review_sessions.get(pid)
+            if not sess:
+                sess = f"Today {b['time'][:5]}"       # this session's first bank time
+                self._review_sessions[pid] = sess
+            self._add_review_row(sess, b["time"], b["slot"], b["card"], path, top=True)
+        self._update_review_count()
+
+    def _update_review_count(self):
         n = len(self.review_tree.get_children())
         self._review_count.configure(text=f"{n} banked")
 
@@ -737,7 +809,7 @@ class LauncherApp:
         try:
             img = self.tk.PhotoImage(file=path)      # Tk 8.6 reads PNG natively
             self._review_img = img                   # hold the ref
-            self._review_preview.configure(image=img, text=f"{vals[1]}  =  {vals[2]}")
+            self._review_preview.configure(image=img, text=f"{vals[2]}  =  {vals[3]}")
         except Exception as e:                        # noqa: BLE001
             self._review_img = None
             self._review_preview.configure(image="", text=f"(can't load crop: {e})")
@@ -753,13 +825,15 @@ class LauncherApp:
             self.status.configure(text=f"can't open folder: {e}", foreground="#a00")
 
     def _clear_review(self):
-        """Clear the Review LIST only — the saved crops/labels on disk are untouched."""
+        """Clear the Review LIST only — the saved crops/labels on disk are untouched.
+        (Refresh reloads them.)"""
         for item in self.review_tree.get_children():
             self.review_tree.delete(item)
         self._review_paths.clear()
+        self._review_sessions.clear()
         self._review_img = None
         self._review_preview.configure(image="", text="(select a row to preview the learned crop)")
-        self._review_count.configure(text="0 banked")
+        self._update_review_count()
 
 
 _MUTEX_NAME = "rgg-advisor-launcher"
