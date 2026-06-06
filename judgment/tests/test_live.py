@@ -2,7 +2,9 @@
 import pytest
 
 from judgment_assist.app.live import (match_player_hand, log_hand, HandTracker,
-                                      CardInput, PokerAdvisor)
+                                      CardInput, PokerAdvisor,
+                                      overlay_blocked_rois, _rects_overlap,
+                                      _base_offset)
 from judgment_assist.blackjack.counting import ShoeCounter
 from judgment_assist.blackjack.strategy import recommend, DOUBLE, SPLIT
 from judgment_assist.cards import parse_cards, cards_str
@@ -472,3 +474,50 @@ def test_log_hand_writes_a_csv_row(tmp_path):
     assert lines[0] == "time,hand,outcome,running,true_count,cards_seen"
     fields = lines[1].split(",")
     assert fields[1] == "1" and fields[2] == "WIN" and fields[3] == "2" and fields[5] == "2"
+
+
+# --- overlay self-occlusion guard (the high-stakes "POT (plate+0)" bug) ---------
+# The live overlay grabs its own pixels off the screen-region capture, so when it
+# floats over an opponent's Bet plate that bet reads as nothing and the pot
+# undercounts. These ROIs mirror config/regions.json's poker section.
+_POKER_ROI = {
+    "opp_bet": [[422, 120, 130, 46], [1035, 120, 130, 46], [1652, 120, 130, 46]],
+    "pot": [1648, 770, 90, 50],
+    "bet": [1705, 920, 90, 40],
+}
+
+
+def test_rects_overlap_basic():
+    assert _rects_overlap((0, 0, 10, 10), (5, 5, 10, 10))
+    assert not _rects_overlap((0, 0, 10, 10), (10, 0, 10, 10))   # edge-touch only
+    assert not _rects_overlap((0, 0, 10, 10), (0, 20, 10, 10))
+
+
+def test_overlay_default_position_blocks_seat0_bet():
+    # The actual bug: overlay at (40,40) with its rendered POT line ~520x180 reaches
+    # x>=422,y in 120-166 -> sits on opp_bet[0], which then reads None.
+    hits = overlay_blocked_rois((40, 40, 520, 180), _POKER_ROI)
+    assert hits == ["opp_bet[0]"]
+
+
+def test_overlay_clear_of_all_rois():
+    # Dragged down into the felt band between the board and the hole cards.
+    assert overlay_blocked_rois((40, 440, 520, 160), _POKER_ROI) == []
+
+
+def test_overlay_blocks_pot_plate():
+    assert "pot" in overlay_blocked_rois((1600, 740, 200, 120), _POKER_ROI)
+
+
+def test_base_offset_shifts_overlay_into_roi_space():
+    # With a windowed capture, a screen-space overlay must be shifted by the window
+    # origin before testing — same overlay, origin (40,40) window, lands on opp0.
+    base = {"left": 0, "top": 0, "width": 1920, "height": 1080}
+    assert _base_offset(base) == (0, 0)
+    assert _base_offset([400, 100, 1920, 1080]) == (400, 100)
+    assert _base_offset(None) == (0, 0)
+    # overlay at screen (840,220) over a window starting at (400,100) -> (440,120)
+    # in ROI coords, which lands on opp_bet[0].
+    hits = overlay_blocked_rois((840, 220, 200, 80), _POKER_ROI,
+                                _base_offset([400, 100, 1920, 1080]))
+    assert hits == ["opp_bet[0]"]

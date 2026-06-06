@@ -77,6 +77,65 @@ def grab_frame(g, cfg):
     return g.grab(base)
 
 
+def _rects_overlap(a, b):
+    """True if two ``[left, top, w, h]`` rectangles intersect (touching edges
+    don't count)."""
+    al, at, aw, ah = a
+    bl, bt, bw, bh = b
+    return al < bl + bw and bl < al + aw and at < bt + bh and bt < at + ah
+
+
+def overlay_blocked_rois(overlay_rect, roi_cfg, base_offset=(0, 0)):
+    """Names of the poker reader ROIs the floating overlay is sitting on top of.
+
+    The frame is a screen-region grab, so the overlay physically occludes whatever
+    table plate it covers — the reader then reads the overlay's own text (or finds
+    no digits) instead, silently undercounting the pot when it lands on an
+    opponent's Bet plate. ``overlay_rect`` and ``base_offset`` are screen coords;
+    ROIs are relative to the captured region, so we shift the overlay into ROI
+    space before testing. Returns the blocked labels (e.g. ``opp_bet[0]``)."""
+    ox, oy, ow, oh = overlay_rect
+    bl, bt = base_offset
+    rect = (ox - bl, oy - bt, ow, oh)
+    hits = []
+    for i, roi in enumerate(roi_cfg.get("opp_bet", [])):
+        if _rects_overlap(rect, roi):
+            hits.append(f"opp_bet[{i}]")
+    for key in ("pot", "bet"):
+        if key in roi_cfg and _rects_overlap(rect, roi_cfg[key]):
+            hits.append(key)
+    return hits
+
+
+def _base_offset(base):
+    """Screen-space (left, top) of the capture region, for shifting an overlay
+    rect into ROI coords. The whole-monitor grab (``base is None``) and the
+    game-not-found sentinel both have a zero offset."""
+    if isinstance(base, dict):
+        return base.get("left", 0), base.get("top", 0)
+    if isinstance(base, (list, tuple)) and len(base) >= 2:
+        return base[0], base[1]
+    return 0, 0
+
+
+def _overlay_occlusion_warning(overlay, cfg, roi_cfg):
+    """Warning line when the live overlay is covering a poker reader ROI, else
+    ``None``. The overlay grabs its own pixels off the screen-region capture, so
+    sitting on an opponent's Bet plate makes that bet read as nothing and the pot
+    undercount — drag the box clear to fix it. Best-effort: any GUI/geometry error
+    just yields no warning."""
+    try:
+        r = overlay.root
+        rect = (r.winfo_rootx(), r.winfo_rooty(),
+                r.winfo_width(), r.winfo_height())
+    except Exception:
+        return None
+    hits = overlay_blocked_rois(rect, roi_cfg, _base_offset(resolve_base(cfg)))
+    if not hits:
+        return None
+    return f"⚠ overlay covers {', '.join(hits)} - drag it clear (pot undercount)"
+
+
 def _insurance(dealer, true_count):
     # Insurance is +EV only at a high true count, on a dealer Ace up.
     return ("  [TAKE INSURANCE]" if (dealer == 11 and true_count is not None
@@ -841,7 +900,12 @@ def run(a):
                 def tick():
                     if overlay.closed:
                         return
-                    overlay.update_text(step(grab_frame(g, cfg)))
+                    text = step(grab_frame(g, cfg))
+                    if a.game == "poker":
+                        warn = _overlay_occlusion_warning(overlay, cfg, roi_cfg)
+                        if warn:
+                            text = warn + "\n" + text
+                    overlay.update_text(text)
                     overlay.root.after(interval_ms, tick)
 
                 overlay.root.after(0, tick)
