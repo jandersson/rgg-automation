@@ -304,6 +304,7 @@ class PokerAdvisor:
         self._cand, self._cand_n = None, 0   # stability filter for hole detection
         self._board_fixed = set()         # board slots the hero typed (don't auto-overwrite)
         self._board_cand, self._board_cand_n = None, 0   # board stability filter
+        self._board_wait = 0              # frames the board read hasn't stabilised
         self._good_frame = None           # last LIVE (cards-present) frame, for capture
         self._key = self._eq = None
 
@@ -440,9 +441,18 @@ class PokerAdvisor:
 
         nb = board_count(frame, self.cfg)
         bdet = tuple(recog(f"B{i}", *self.cfg["board"][i])[0] for i in range(nb))
-        self._board_cand_n = self._board_cand_n + 1 if bdet == self._board_cand else 1
-        self._board_cand = bdet
+        # Stability over only the slots we'd actually fill (non-fixed): a flickering
+        # read on an already-corrected slot must NOT block new community cards from
+        # appearing (that's what left it stuck on "reading the board").
+        fill_sig = tuple(c for i, c in enumerate(bdet) if i not in self._board_fixed)
+        self._board_cand_n = self._board_cand_n + 1 if fill_sig == self._board_cand else 1
+        self._board_cand = fill_sig
         board_stable = self._board_cand_n >= 2
+        # Patience: if it can't stabilise for a few frames, fill anyway so it never
+        # gets permanently stuck (and the slot becomes correctable).
+        self._board_wait = 0 if board_stable else self._board_wait + 1
+        if self._board_wait >= 5:
+            board_stable, self._board_wait = True, 0
 
         with self._lock:
             if hole_stable:
