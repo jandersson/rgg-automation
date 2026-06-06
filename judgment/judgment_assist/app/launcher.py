@@ -544,18 +544,33 @@ class LauncherApp:
         s = self._sess
         if not s or not s["running"]:
             return
-        frame = s["grab_frame"](s["grab"], s["cfg"])
-        if frame is None or frame.size == 0 or min(frame.shape[:2]) < 10:
-            text = "poker: 'Judgment' window not found - open it on the poker table"
-        elif s["dim"](frame):
-            text = "== PAUSED ==  (resume the game)" + (f"\n\n{s['last']}" if s["last"] else "")
-        else:
-            text = s["advisor"].text(frame)
-            s["last"] = text
-        s["overlay"].update_text(text)
-        self._refresh_corrections()
-        self._append_live_banks()
-        self.root.after(s["interval"], self._tick)
+        # A throw anywhere below used to skip the reschedule and FREEZE the overlay
+        # (e.g. it got stuck on "reading the board" if a card read raised). Guard the
+        # whole frame and always reschedule, so one bad frame just gets retried.
+        try:
+            frame = s["grab_frame"](s["grab"], s["cfg"])
+            if frame is None or frame.size == 0 or min(frame.shape[:2]) < 10:
+                text = "poker: 'Judgment' window not found - open it on the poker table"
+            elif s["dim"](frame):
+                text = "== PAUSED ==  (resume the game)" + (f"\n\n{s['last']}" if s["last"] else "")
+            else:
+                text = s["advisor"].text(frame)
+                s["last"] = text
+            s["overlay"].update_text(text)
+            self._refresh_corrections()
+            self._append_live_banks()
+        except Exception as e:                    # noqa: BLE001 - keep the loop alive
+            import traceback
+            print(f"  tick error (recovered, retrying): {e}")
+            traceback.print_exc()
+            try:
+                s["overlay"].update_text((s.get("last") or "(reading...)")
+                                         + f"\n(read hiccup: {e})")
+            except Exception:                     # noqa: BLE001
+                pass
+        finally:
+            if s.get("running"):
+                self.root.after(s["interval"], self._tick)
 
     def _stop_session(self):
         s = self._sess
