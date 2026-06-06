@@ -140,6 +140,17 @@ def test_label_library_guess_and_set_reviewed(tmp_path):
     assert lib.entries()[0]["reviewed"] is True
 
 
+def test_label_library_reload_survives_torn_json(tmp_path):
+    # a concurrent writer (you labeling) can leave labels.json mid-write; reload must
+    # not crash the reader — it keeps the last good copy and retries next time.
+    lib = PC.LabelLibrary(str(tmp_path))
+    lib.add(_whole("A", red=True), "cap1_1", "H0", rank="A", suit="h")
+    before = dict(lib.labels)
+    (tmp_path / "labels.json").write_text("{ partial write")   # torn JSON
+    lib.reload()                                               # must not raise
+    assert lib.labels == before                               # kept the prior copy
+
+
 def test_label_library_is_dup(tmp_path):
     lib = PC.LabelLibrary(str(tmp_path))
     lib.add(_whole("A", red=True), "cap1_1", "H0", rank="A", suit="h")

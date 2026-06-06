@@ -291,8 +291,11 @@ class LabelLibrary:
         self.reload()
 
     def reload(self):
-        self.labels = (json.load(open(self.labels_path, encoding="utf-8"))
-                       if os.path.exists(self.labels_path) else {})
+        try:
+            self.labels = (json.load(open(self.labels_path, encoding="utf-8"))
+                           if os.path.exists(self.labels_path) else {})
+        except (ValueError, OSError):       # torn/partial read while a writer is mid-save;
+            self.labels = getattr(self, "labels", {})   # keep what we have, the next reload retries
 
     def _save(self):
         with open(self.labels_path, "w", encoding="utf-8") as f:
