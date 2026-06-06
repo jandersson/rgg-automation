@@ -103,7 +103,8 @@ def train_and_save(card_dir="data/poker_cards", out_path=None, epochs=70, device
     from ..cards import RANK_TO_INT, SUIT_TO_INT
     from .poker_cards import _SUIT_LETTER
     dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
-    out_path = out_path or os.path.join(card_dir, "cnn_card.pt")
+    out_path = out_path or os.path.join("models", "cnn_card.pt")   # tracked (LFS), not gitignored
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     labels = json.load(open(os.path.join(card_dir, "labels.json"), encoding="utf-8"))
     imgs, ranks, suits = [], [], []
     for key, lab in labels.items():

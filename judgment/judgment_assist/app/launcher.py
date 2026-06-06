@@ -241,7 +241,7 @@ class LauncherApp:
                         variable=self.v["reader"]).grid(row=0, column=1, sticky="w", padx=8)
         self._help(self.pf, 11, "HOG retrains instantly on your corrections. CNN reads better "
                                 "(incl. obscured cards) but is fixed until retrained, and needs the "
-                                "trained model file (data/poker_cards/cnn_card.pt).")
+                                "trained model file (models/cnn_card.pt).")
 
         # blackjack options
         self.bf = ttk.LabelFrame(body, text="Blackjack options")
@@ -478,10 +478,10 @@ class LauncherApp:
         if o["detect"]:
             cards_dir = ROOT / "data" / "poker_cards"
             if o.get("reader") == "CNN":
-                ckpt = cards_dir / "cnn_card.pt"
+                ckpt = ROOT / "models" / "cnn_card.pt"
                 try:
                     if not ckpt.exists():
-                        raise FileNotFoundError("no trained CNN model (cnn_card.pt)")
+                        raise FileNotFoundError("no trained CNN model (models/cnn_card.pt)")
                     from ..vision.cnn_cards import CnnCardReader     # lazy: torch only here
                     card_reader = CnnCardReader(str(ckpt))
                     print("card reader: CNN (ResNet34) — fixed model, corrections bank for retrain")
