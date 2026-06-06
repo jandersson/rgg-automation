@@ -32,6 +32,7 @@ DEFAULTS = {
     "overlay": True,        # False -> --no-overlay (console only)
     # poker
     "detect": True,         # False -> --no-detect
+    "reader": "HOG",        # card reader: "HOG" (learns as you play) or "CNN" (stronger, fixed)
     "learn": True,          # False -> --no-learn
     "confirm_key": "insert",   # global confirm hotkey (controller back button)
     "opp": 3,               # Judgment poker is 4-handed (you + 3)
@@ -174,6 +175,7 @@ class LauncherApp:
             "y": tk.StringVar(value=str(DEFAULTS["y"])),
             "overlay": tk.BooleanVar(value=DEFAULTS["overlay"]),
             "detect": tk.BooleanVar(value=DEFAULTS["detect"]),
+            "reader": tk.StringVar(value=DEFAULTS["reader"]),
             "learn": tk.BooleanVar(value=DEFAULTS["learn"]),
             "confirm_key": tk.StringVar(value=DEFAULTS["confirm_key"]),
             "opp": tk.StringVar(value=str(DEFAULTS["opp"])),
@@ -229,6 +231,16 @@ class LauncherApp:
         ttk.Entry(self.pf, textvariable=self.v["confirm_key"], width=8).grid(row=8, column=1, sticky="w")
         self._help(self.pf, 9, "Global key that confirms the hand (= Enter). Map a Steam "
                                "controller back button to it. f13-f24/home/end/... ; blank = off.")
+        ttk.Label(self.pf, text="Card reader").grid(row=10, column=0, sticky="w", **pad)
+        rf = ttk.Frame(self.pf)
+        rf.grid(row=10, column=1, columnspan=3, sticky="w")
+        ttk.Radiobutton(rf, text="HOG (learns as you play)", value="HOG",
+                        variable=self.v["reader"]).grid(row=0, column=0, sticky="w")
+        ttk.Radiobutton(rf, text="CNN (stronger, fixed)", value="CNN",
+                        variable=self.v["reader"]).grid(row=0, column=1, sticky="w", padx=8)
+        self._help(self.pf, 11, "HOG retrains instantly on your corrections. CNN reads better "
+                                "(incl. obscured cards) but is fixed until retrained, and needs the "
+                                "trained model file (data/poker_cards/cnn_card.pt).")
 
         # blackjack options
         self.bf = ttk.LabelFrame(body, text="Blackjack options")
@@ -353,6 +365,7 @@ class LauncherApp:
             "y": int(self.v["y"].get()),
             "overlay": self.v["overlay"].get(),
             "detect": self.v["detect"].get(),
+            "reader": self.v["reader"].get(),
             "learn": self.v["learn"].get(),
             "confirm_key": self.v["confirm_key"].get().strip(),
             "opp": int(self.v["opp"].get()),
@@ -462,11 +475,23 @@ class LauncherApp:
             return
         card_reader = training = None
         if o["detect"]:
-            try:
-                from ..vision.poker_cards import HoleCardReader
-                card_reader = HoleCardReader(str(ROOT / "data" / "poker_cards"))
-            except RuntimeError:
-                pass
+            cards_dir = ROOT / "data" / "poker_cards"
+            if o.get("reader") == "CNN":
+                ckpt = cards_dir / "cnn_card.pt"
+                try:
+                    if not ckpt.exists():
+                        raise FileNotFoundError("no trained CNN model (cnn_card.pt)")
+                    from ..vision.cnn_cards import CnnCardReader     # lazy: torch only here
+                    card_reader = CnnCardReader(str(ckpt))
+                    print("card reader: CNN (ResNet34) — fixed model, corrections bank for retrain")
+                except Exception as e:                # noqa: BLE001 - fall back to HOG
+                    print(f"  (CNN reader unavailable — {e}; using HOG)")
+            if card_reader is None:
+                try:
+                    from ..vision.poker_cards import HoleCardReader
+                    card_reader = HoleCardReader(str(cards_dir))
+                except RuntimeError:
+                    pass
         if o["learn"]:
             try:
                 from ..vision.poker_cards import TrainingWriter
