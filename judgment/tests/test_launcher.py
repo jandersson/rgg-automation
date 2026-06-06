@@ -331,6 +331,40 @@ def test_reviewed_count_and_hide_filter(tmp_path):
         root.destroy()
 
 
+def test_save_unchanged_label_confirms_without_refit(tmp_path):
+    """Saving an already-correct label marks it reviewed but skips the (pointless)
+    detector refit; changing the label does refit."""
+    import pytest
+    pytest.importorskip("cv2")
+    root, app = _gui()
+    try:
+        _temp_lib(app, tmp_path)
+        k, p = app._lib.add(_crop(), "frame_z", "B0", rank="K", suit="s")
+        app._lib.labels[k].pop("reviewed")            # start un-reviewed
+        app._lib._save()
+        app._reload_labels_list()
+        refits = []
+
+        class _Reader:
+            def reload(self):
+                refits.append(1)
+        app._sess = {"advisor": type("A", (), {"training": None,
+                     "card_reader": _Reader(), "banked": []})()}
+        app._refit_var.set(True)
+        app.labels_tree.selection_set(p)
+        app._show_label_crop()                        # pickers pre-filled K / s
+        app._save_label()                             # unchanged
+        assert app._lib.labels[k]["reviewed"] is True
+        assert refits == []                           # no wasted refit
+        app.labels_tree.selection_set(p)
+        app._edit_rank.set("Q")                       # now actually change it
+        app._save_label()
+        assert app._lib.labels[k]["rank"] == "Q" and refits == [1]   # refit fired
+    finally:
+        app._sess = None
+        root.destroy()
+
+
 def test_mark_reviewed_only_on_labeled(tmp_path):
     import pytest
     pytest.importorskip("cv2")

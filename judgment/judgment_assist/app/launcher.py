@@ -925,10 +925,16 @@ class LauncherApp:
             self._labels_status("pick a rank and a suit", err=True)
             return
         self._lib.reload()                            # pick up any live banks first
+        prev = self._lib.labels.get(key, {})
+        unchanged = (prev.get("rank") == r
+                     and self._SUIT_LETTER.get(prev.get("suit", "")) == su)
         self._lib.set_label(key, r, su)
-        self._sync_after_edit()
+        # Saving an unchanged label just confirms it (marks reviewed) — the training
+        # set didn't change, so skip the detector refit; only resync the writer.
+        self._sync_writer() if unchanged else self._sync_after_edit()
         self._reload_labels_list(select=iid)
-        self._labels_status(f"labelled {self._SLOT_HUMAN.get(key.split('#')[1])} = {r}{su}")
+        slot = self._SLOT_HUMAN.get(key.split("#")[1])
+        self._labels_status(f"{'confirmed' if unchanged else 'labelled'} {slot} = {r}{su}")
 
     def _mark_reviewed(self):
         """Mark the selected (already-labeled) crop reviewed — 'this label is right' —
