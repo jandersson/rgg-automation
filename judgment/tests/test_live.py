@@ -361,6 +361,27 @@ def test_confirm_banks_detected_board_too():
     assert slots == ["H0", "H1", "B0", "B1", "B2"]
 
 
+def test_confirm_logs_every_press_even_when_nothing_new_is_banked(capsys):
+    # _capture is silent when the writer dedups, so confirm() must log on its own
+    # or a press on a static/repeated hand leaves no trace in the Log pane.
+    class _DupWriter:                            # always reports "already have it"
+        def save(self, *a):
+            return False
+    cr = _FakeCardReader(_det("Ac", "Kd"))
+    pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
+                      _poker_cfg(), iters=2000, card_reader=cr, training=_DupWriter())
+    pa.text(_frame(0)); pa.text(_frame(0))       # detect -> hole set
+    pa.confirm()
+    assert "confirm Ac Kd" in capsys.readouterr().out   # logged despite no new bank
+
+
+def test_confirm_logs_when_no_hand_detected(capsys):
+    pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
+                      _poker_cfg(), iters=2000)
+    pa.confirm()                                 # nothing dealt yet
+    assert "no hand detected yet" in capsys.readouterr().out
+
+
 def test_poker_advisor_no_capture_when_learning_off():
     pa = PokerAdvisor(_FakeReader({"pot": 0, "my": 0, "o0": 0, "o1": 0, "o2": 0}),
                       _poker_cfg(), iters=2000, training=None)   # learn off

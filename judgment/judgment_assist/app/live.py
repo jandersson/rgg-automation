@@ -339,6 +339,18 @@ class PokerAdvisor:
                 self.hole_locked = True
             if board:
                 self._board_fixed = set(range(len(board)))   # verified -> locked
+        # Log EVERY confirm, not just newly-banked crops: _capture is silent when
+        # dedup skips an already-saved hand, so without this a confirm on a static
+        # or repeated hand left no trace in the Log pane — you couldn't tell the
+        # R4/Insert/Enter press registered. Timestamped so it doubles as a press log.
+        ts = time.strftime("%H:%M:%S")
+        if len(hole) == 2 or board:
+            shown = cards_str(hole) if len(hole) == 2 else "?"
+            if board:
+                shown += " | " + cards_str(board)
+            print(f"[{ts}] confirm {shown}")
+        else:
+            print(f"[{ts}] confirm: no hand detected yet (deal in first)")
         if len(hole) == 2:
             self._capture(self.cfg.get("hole", []), hole, "H")
         if board:
