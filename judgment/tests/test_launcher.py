@@ -181,6 +181,58 @@ def test_labels_tab_live_bank_appends_labeled_row(tmp_path):
         root.destroy()
 
 
+def _one_card_frame():
+    """A 1080p felt frame with a single face-up card at hole slot 0 (real ROIs)."""
+    import json
+    np = __import__("numpy")
+    from judgment_assist.app.launcher import ROOT
+    poker = json.load(open(ROOT / "config" / "regions.json", encoding="utf-8"))["poker"]
+    hx, hy = poker["hole"][0]
+    frame = np.full((1080, 1920, 3), (70, 120, 40), np.uint8)
+    frame[hy - 12:hy + 388, hx:hx + 278] = 235
+    return frame, poker
+
+
+def test_capture_from_game_adds_unlabeled_crops(tmp_path):
+    import pytest
+    pytest.importorskip("numpy")
+    pytest.importorskip("cv2")
+    frame, poker = _one_card_frame()
+    root, app = _gui()
+    try:
+        _temp_lib(app, tmp_path)
+        app._sess = {"grab": None, "cfg": {"poker": poker},
+                     "grab_frame": lambda g, c: frame,
+                     "advisor": type("A", (), {"banked": []})()}
+        app._capture_from_game()
+        caps = [k for k in app._lib.labels if k.startswith("cap")]
+        assert len(caps) == 1 and app._lib.labels[caps[0]] == {}   # captured, unlabeled
+        assert app._labels_needs == 1
+        app._capture_from_game()                       # same frame -> dedup, no new crop
+        assert sum(k.startswith("cap") for k in app._lib.labels) == 1
+    finally:
+        app._sess = None
+        root.destroy()
+
+
+def test_import_frames_adds_unlabeled_crops(tmp_path):
+    import pytest
+    pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    frame, _ = _one_card_frame()
+    fp = tmp_path / "shotA.png"
+    cv2.imwrite(str(fp), frame)
+    root, app = _gui()
+    try:
+        _temp_lib(app, tmp_path)
+        app._import_frames([str(fp)])
+        imps = [k for k in app._lib.labels if k.startswith("imp_")]
+        assert imps and all(app._lib.labels[k] == {} for k in imps)   # unlabeled
+        assert app._labels_needs == len(imps)
+    finally:
+        root.destroy()
+
+
 def test_labels_tab_fix_skip_delete(tmp_path):
     import os
     import pytest

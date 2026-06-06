@@ -732,6 +732,13 @@ class LauncherApp:
         self._refit_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(mid, text="Refit detector after edits (live session)",
                         variable=self._refit_var).grid(row=3, column=1, columnspan=4, sticky="w")
+        create = ttk.Frame(mid)
+        create.grid(row=4, column=1, columnspan=4, sticky="w", pady=(6, 0))
+        ttk.Label(create, text="Add crops:", font=("Segoe UI", 9)).grid(row=0, column=0)
+        ttk.Button(create, text="Capture from game", command=self._capture_from_game
+                   ).grid(row=0, column=1, padx=4)
+        ttk.Button(create, text="Import screenshots…", command=self._import_screenshots
+                   ).grid(row=0, column=2)
         self._labels_msg = ttk.Label(parent, text="", foreground="#070")
         self._labels_msg.grid(row=3, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 6))
 
@@ -740,6 +747,7 @@ class LauncherApp:
         self._labels_key = {}            # tree iid -> labels.json key (frame#slot)
         self._labels_needs = 0
         self._live_seen = 0
+        self._cap_pid, self._cap_seq = os.getpid(), 0    # ids for captured crops
         self._reload_labels_list()
 
     @staticmethod
@@ -920,6 +928,96 @@ class LauncherApp:
                 subprocess.Popen(["xdg-open", str(d)])
         except Exception as e:                        # noqa: BLE001
             self._labels_status(f"can't open folder: {e}", err=True)
+
+    # ----------------------------------------------------- create new crops ----
+    def _grab_poker_frame(self):
+        """One poker frame + its 'poker' ROIs for capturing crops. Uses the running
+        session's grabber if there is one, else a one-shot grab from the configured
+        screen. Returns (frame, poker_cfg) or (None, reason)."""
+        from .live import load_config, grab_frame, _screen_dimmed
+        from ..capture.screen import ScreenGrabber
+        if self._sess:
+            s = self._sess
+            frame, cfg = s["grab_frame"](s["grab"], s["cfg"]), s["cfg"]
+        else:
+            try:
+                cfg = load_config(str(ROOT / (self.v["config"].get().strip()
+                                              or "config/regions.json")))
+            except Exception as e:                    # noqa: BLE001
+                return None, f"config error: {e}"
+            with ScreenGrabber(monitor=cfg.get("monitor", 1)) as g:
+                frame = grab_frame(g, cfg)
+        if frame is None or frame.size == 0 or min(frame.shape[:2]) < 10:
+            return None, "Judgment window not found — open it on the poker table"
+        if _screen_dimmed(frame):
+            return None, "screen is dimmed/paused — resume the game, then capture"
+        if not cfg.get("poker"):
+            return None, "no 'poker' ROIs in the config (calibrate first)"
+        return (frame, cfg["poker"]), None
+
+    def _capture_from_game(self):
+        """Grab the face-up cards on screen now and add each as a NEW unlabeled crop
+        (deduped against the library), ready to label in the list."""
+        from ..vision.poker_cards import whole_card_crops
+        got, err = self._grab_poker_frame()
+        if err:
+            return self._labels_status(err, err=True)
+        frame, poker = got
+        self._lib.reload()
+        n = 0
+        for slot, crop in whole_card_crops(frame, poker):
+            if self._lib.is_dup(crop):
+                continue
+            self._cap_seq += 1
+            self._lib.add(crop, f"cap{self._cap_pid}_{self._cap_seq}", slot)
+            n += 1
+        self._reload_labels_list()
+        self._labels_status(
+            f"captured {n} new crop(s) — pick a row and label it" if n
+            else "nothing new on screen (already in the library)", err=(n == 0))
+
+    def _import_screenshots(self):
+        """Pick saved poker FRAMES (full-res, e.g. data/poker) and import their
+        face-up cards as unlabeled crops. (Steam screenshots are downscaled and
+        won't line up with the ROIs — those yield nothing, by design.)"""
+        from tkinter import filedialog
+        paths = filedialog.askopenfilenames(
+            title="Import poker frames", initialdir=str(ROOT / "data" / "poker"),
+            filetypes=[("Images", "*.png *.jpg *.jpeg"), ("All files", "*.*")])
+        if paths:
+            self._import_frames(list(paths))
+
+    def _import_frames(self, paths):
+        """Core of import (no dialog, so it's testable): crop each frame's face-up
+        slots and add the new, non-duplicate ones as unlabeled crops."""
+        import cv2
+        from .live import load_config
+        from ..vision.poker_cards import whole_card_crops
+        try:
+            cfg = load_config(str(ROOT / (self.v["config"].get().strip()
+                                          or "config/regions.json")))
+        except Exception as e:                        # noqa: BLE001
+            return self._labels_status(f"config error: {e}", err=True)
+        poker = cfg.get("poker")
+        if not poker:
+            return self._labels_status("no 'poker' ROIs in the config", err=True)
+        self._lib.reload()
+        n = 0
+        for p in paths:
+            im = cv2.imread(p)
+            if im is None:
+                continue
+            stem = os.path.splitext(os.path.basename(p))[0]
+            for slot, crop in whole_card_crops(im, poker):
+                if self._lib.is_dup(crop):
+                    continue
+                self._lib.add(crop, f"imp_{stem}", slot)
+                n += 1
+        self._reload_labels_list()
+        self._labels_status(
+            f"imported {n} new crop(s) — label them in the list" if n
+            else "no new cards found (wrong resolution, or already imported)",
+            err=(n == 0))
 
 
 _MUTEX_NAME = "rgg-advisor-launcher"
