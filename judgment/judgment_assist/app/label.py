@@ -284,6 +284,67 @@ def build_poker_task(frame_glob_or_paths, config_path="config/regions.json",
     return task
 
 
+def extract_obscured(frame_glob_or_paths, card_dir="data/poker_cards",
+                     config_path="config/regions.json", lo=0.15, hi=0.55, dedup=8):
+    """Mine partially-covered card slots from frames and write them as UNLABELED
+    crops into the label library, for the Labels-tab second pass to label or skip.
+
+    The live ``card_present`` gate (corner >55% white) excludes obscured cards (a
+    banner/tooltip over the slot), so they never reach training. This pulls the
+    in-between slots — corner white-fraction in ``(lo, hi)`` — as whole-card crops,
+    deduped against the library and each other. Returns ``(written, scanned)``."""
+    import cv2
+    import numpy as np
+    from ..vision.locate import _WHITE_LO, _WHITE_HI
+    from ..vision.poker_cards import whole_roi, LabelLibrary, _STORE
+    cfg = json.load(open(config_path, encoding="utf-8"))["poker"]
+    cw, ch = cfg["corner"]
+    slots = ([(f"H{i}", x, y) for i, (x, y) in enumerate(cfg["hole"])] +
+             [(f"B{i}", x, y) for i, (x, y) in enumerate(cfg["board"])])
+    paths = (sorted(glob.glob(frame_glob_or_paths)) if isinstance(frame_glob_or_paths, str)
+             else list(frame_glob_or_paths))
+    lib = LabelLibrary(card_dir)
+
+    def whitefrac(c):
+        return float(cv2.inRange(cv2.cvtColor(c, cv2.COLOR_BGR2HSV),
+                                 _WHITE_LO, _WHITE_HI).mean()) / 255.0
+
+    def sig(crop):                              # crops compared at a common size
+        return cv2.resize(cv2.cvtColor(cv2.resize(crop, _STORE), cv2.COLOR_BGR2GRAY),
+                          (18, 26)).astype("int16")
+
+    sigs = []                                   # dedup vs the existing library...
+    for key in lib.labels:
+        im = cv2.imread(lib._path(key))
+        if im is not None:
+            sigs.append(sig(im))
+    written = scanned = seq = 0
+    for fp in paths:
+        im = cv2.imread(fp)
+        if im is None:
+            continue
+        stem = os.path.splitext(os.path.basename(fp))[0]
+        for name, x, y in slots:
+            corner = im[y:y + ch, x:x + cw]
+            if corner.shape[:2] != (ch, cw):
+                continue
+            scanned += 1
+            if not (lo < whitefrac(corner) < hi):
+                continue
+            l, t, w, h = whole_roi((x, y), name)
+            crop = im[max(t, 0):t + h, max(l, 0):l + w]
+            if crop.shape[:2] != (h, w):
+                continue
+            s = sig(crop)
+            if any(float(np.mean(np.abs(s - o))) < dedup for o in sigs):  # ...and each other
+                continue
+            sigs.append(s)
+            seq += 1
+            lib.add(crop, f"obsc{seq}_{stem}", name)     # unlabeled -> Labels-tab worklist
+            written += 1
+    return written, scanned
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="judgment-assist label")
     p.add_argument("--task", help="an existing task JSON")
@@ -293,8 +354,17 @@ def main(argv=None):
     p.add_argument("--out", help="results JSON path (with --dir)")
     p.add_argument("--cards", nargs="+", help="frame paths/globs -> build a blackjack card rank+colour task")
     p.add_argument("--poker", nargs="+", help="frame paths/globs -> build a poker rank+suit corner task")
+    p.add_argument("--obscured", nargs="+",
+                   help="frame paths/globs -> extract partially-covered card slots as "
+                        "UNLABELED crops into data/poker_cards for the Labels tab")
     a = p.parse_args(argv)
 
+    if a.obscured:
+        paths = [q for g in a.obscured for q in (glob.glob(g) or [g])]
+        written, scanned = extract_obscured(paths)
+        print(f"extracted {written} obscured crops (scanned {scanned} slots) -> "
+              f"data/poker_cards — label them in the Labels tab")
+        return
     if a.task:
         task = load_task(a.task)
     elif a.cards:

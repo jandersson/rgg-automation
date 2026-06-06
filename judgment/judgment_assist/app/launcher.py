@@ -809,6 +809,8 @@ class LauncherApp:
             return "Session"
         if frame.startswith("cap"):
             return "Capture"
+        if frame.startswith("obsc"):
+            return "Obscured"
         return "Import"
 
     def _label_text(self, e):

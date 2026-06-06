@@ -6,6 +6,27 @@ import pytest
 from judgment_assist.labeling import LabelSession, images_task, SKIP
 
 
+def test_extract_obscured_pulls_partial_slots(tmp_path):
+    cv2 = pytest.importorskip("cv2")
+    import numpy as np
+    from judgment_assist.app.label import extract_obscured
+    cfg = json.load(open("config/regions.json", encoding="utf-8"))["poker"]
+    cw, ch = cfg["corner"]
+    hx, hy = cfg["hole"][0]
+    frame = np.full((1080, 1920, 3), (70, 120, 40), np.uint8)      # green felt, no cards
+    # paint ~30% of the hole-0 corner white -> obscured band (0.15-0.55); other slots felt
+    frame[hy:hy + ch // 3, hx:hx + cw] = 235
+    fp = tmp_path / "f.png"
+    cv2.imwrite(str(fp), frame)
+    cards = tmp_path / "cards"
+    cards.mkdir()
+    (cards / "labels.json").write_text("{}")
+    written, scanned = extract_obscured([str(fp)], str(cards))
+    assert written == 1 and scanned == 7                            # one partial slot of 7
+    (key, val), = json.load(open(cards / "labels.json")).items()
+    assert key.startswith("obsc") and key.endswith("#H0") and val == {}   # unlabeled
+
+
 def test_glyph_color_red_vs_black():
     cv2 = pytest.importorskip("cv2")
     import numpy as np
