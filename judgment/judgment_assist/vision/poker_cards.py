@@ -360,6 +360,44 @@ class LabelLibrary:
         self._save()
         return key, path
 
+    def suspect_labels(self, k=5):
+        """Flag likely-mislabeled crops by kNN label consistency: for each labeled
+        crop, look at its ``k`` nearest neighbours (HOG-feature distance) among the
+        rest; if its rank is NOT the neighbourhood's majority, the label is suspect
+        — a real mislabel, or a genuinely hard crop, either way worth a human look.
+        Returns ``[{key, label, suggest, votes}, …]`` worst (strongest disagreement)
+        first. Pure read; changes nothing."""
+        import collections
+        hog = _hog()
+        keys, ranks, suits, feats = [], [], [], []
+        for key, lab in self.labels.items():
+            if lab.get("_skip") or "rank" not in lab:
+                continue
+            crop = cv2.imread(self._path(key))
+            if crop is None:
+                continue
+            keys.append(key)
+            ranks.append(lab["rank"])
+            suits.append(lab["suit"])
+            feats.append(_features(crop, hog))
+        if len(keys) <= k:
+            return []
+        X = np.array(feats)
+        suspects = []
+        for i, key in enumerate(keys):
+            d = np.linalg.norm(X - X[i], axis=1)
+            nbr = [j for j in np.argsort(d) if j != i][:k]
+            rank_votes = collections.Counter(ranks[j] for j in nbr)
+            top_rank, votes = rank_votes.most_common(1)[0]
+            if top_rank != ranks[i] and votes >= (k // 2 + 1):
+                suit_top = collections.Counter(suits[j] for j in nbr).most_common(1)[0][0]
+                suspects.append({
+                    "key": key,
+                    "label": ranks[i] + _SUIT_LETTER[suits[i]],
+                    "suggest": top_rank + _SUIT_LETTER[suit_top],
+                    "votes": votes})
+        return sorted(suspects, key=lambda s: s["votes"], reverse=True)
+
     def is_dup(self, crop_bgr, thresh=7):
         """True if a near-identical crop is already in the library (same dedup metric
         the live writer uses) — so capture/import don't flood with repeats."""

@@ -117,6 +117,20 @@ def test_label_library_add_fix_skip_delete(tmp_path):
     assert lib.entries() == [] and not os.path.exists(path)   # crop gone too
 
 
+def test_suspect_labels_flags_the_odd_one_out(tmp_path):
+    lib = PC.LabelLibrary(str(tmp_path))
+    for i in range(6):                                    # six lookalike 5♣ crops
+        c = _whole("5", red=False).copy()
+        c[0, 0] = i                                       # tiny pixel nudge, distinct files
+        lib.add(c, f"f{i}", "B0", rank="5", suit="c")
+    lib.add(_whole("5", red=False), "fodd", "B0", rank="9", suit="c")   # a 5-looking "9"
+    s = lib.suspect_labels(k=5)
+    odd = [x for x in s if x["key"] == "fodd#B0"]
+    assert odd and odd[0]["suggest"].startswith("5")     # neighbours say 5, not 9
+    # the genuine 5s are NOT flagged (their neighbourhood agrees)
+    assert not any(x["key"].startswith("f0") for x in s)
+
+
 def test_label_library_guess_and_set_reviewed(tmp_path):
     lib = PC.LabelLibrary(str(tmp_path))
     key, _ = lib.add(_whole("A", red=True), "cap1_1", "H0", guess=("A", "h"))
