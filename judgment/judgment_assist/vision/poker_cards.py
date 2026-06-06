@@ -61,6 +61,14 @@ def _features(card_bgr, hog):
     return hog.compute(g).ravel()
 
 
+def _crop_sig(crop):
+    """Coarse dedup signature: normalise to the stored size, then an 18x26 grey
+    thumbnail. Shared by the writer, the label library, and obscured-crop mining so
+    a crop compares the same way regardless of its source resolution."""
+    return cv2.resize(cv2.cvtColor(cv2.resize(crop, _STORE), cv2.COLOR_BGR2GRAY),
+                      (18, 26)).astype("int16")
+
+
 def _is_red(suit_bgr):
     """True if this suit pip is red (hearts/diamonds) by ink-pixel redness — the
     average over the DARK pixels only (the white card body dilutes a whole-region
@@ -237,7 +245,7 @@ class TrainingWriter:
                 self._sigs.append(self._sig(im))
 
     def _sig(self, crop):
-        return cv2.resize(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), (18, 26)).astype("int16")
+        return _crop_sig(crop)
 
     def save(self, card_bgr, rank_int, suit_int, slot):
         """Write one labeled whole-card crop unless a near-identical one exists.
@@ -403,15 +411,12 @@ class LabelLibrary:
     def is_dup(self, crop_bgr, thresh=7):
         """True if a near-identical crop is already in the library (same dedup metric
         the live writer uses) — so capture/import don't flood with repeats."""
-        sig = cv2.resize(cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY),
-                         (18, 26)).astype("int16")
+        sig = _crop_sig(crop_bgr)
         for key in self.labels:
             im = cv2.imread(self._path(key))
             if im is None:
                 continue
-            s = cv2.resize(cv2.cvtColor(cv2.resize(im, _STORE), cv2.COLOR_BGR2GRAY),
-                           (18, 26)).astype("int16")
-            if float(np.mean(np.abs(sig - s))) < thresh:
+            if float(np.mean(np.abs(sig - _crop_sig(im)))) < thresh:
                 return True
         return False
 

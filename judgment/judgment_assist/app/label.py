@@ -300,7 +300,7 @@ def extract_obscured(frame_glob_or_paths, card_dir="data/poker_cards",
     import cv2
     import numpy as np
     from ..vision.locate import _WHITE_LO, _WHITE_HI
-    from ..vision.poker_cards import whole_roi, LabelLibrary, _STORE
+    from ..vision.poker_cards import whole_roi, LabelLibrary, _crop_sig as sig
     cfg = json.load(open(config_path, encoding="utf-8"))["poker"]
     cw, ch = cfg["corner"]
     slots = ([(f"H{i}", x, y) for i, (x, y) in enumerate(cfg["hole"])] +
@@ -312,10 +312,6 @@ def extract_obscured(frame_glob_or_paths, card_dir="data/poker_cards",
     def whitefrac(c):
         return float(cv2.inRange(cv2.cvtColor(c, cv2.COLOR_BGR2HSV),
                                  _WHITE_LO, _WHITE_HI).mean()) / 255.0
-
-    def sig(crop):                              # crops compared at a common size
-        return cv2.resize(cv2.cvtColor(cv2.resize(crop, _STORE), cv2.COLOR_BGR2GRAY),
-                          (18, 26)).astype("int16")
 
     sigs = []                                   # dedup vs the existing library...
     for key in lib.labels:
