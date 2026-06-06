@@ -32,7 +32,8 @@ DEFAULTS = {
     "overlay": True,        # False -> --no-overlay (console only)
     # poker
     "detect": True,         # False -> --no-detect
-    "reader": "HOG",        # card reader: "HOG" (learns as you play) or "CNN" (stronger, fixed)
+    "reader": "CNN",        # card reader: "CNN" (default, stronger; falls back to HOG if no
+                            # model file) or "HOG" (learns from corrections as you play)
     "learn": True,          # False -> --no-learn
     "confirm_key": "insert",   # global confirm hotkey (controller back button)
     "opp": 3,               # Judgment poker is 4-handed (you + 3)
