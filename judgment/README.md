@@ -67,10 +67,15 @@ Both also run as interactive REPLs (omit `--hand` / `--hole`).
 Source is **PC Steam, borderless/windowed**; advice/overlay only (no inputs are
 sent to the game). With Judgment open on the blackjack/poker table:
 
-> **GUI launcher** — to pick the game and set the flags from a form instead of
-> the command line, run `uv run python -m judgment_assist.app.launcher`. It opens
-> the advisor as a single floating overlay window (advice + the poker card-entry
-> box, no console) with your chosen flags.
+> **GUI launcher (recommended for poker)** — `uv run python -m judgment_assist.app.launcher`.
+> Pick the game + flags from a form. For **poker** it runs the advisor *in the
+> launcher process*: a small **display-only** floating overlay shows the advice
+> over the game, and **card corrections happen in the launcher** via clickable
+> pickers (two styles to A/B: **Dropdowns** and **Card grid**), plus a **Confirm
+> hand** button, a **Log** pane, and a status line. No console, no typing. Confirm
+> also works via a global hotkey (default **Insert**, map a controller back paddle
+> to it). One launcher + one overlay at a time (mutex-locked). Blackjack still
+> launches as a separate overlay process.
 
 ```powershell
 uv run python -m judgment_assist.capture.calibrate windows                          # find the title
@@ -83,30 +88,25 @@ uv run python -m judgment_assist.app.live blackjack                             
 You can also mark HUD/card ROIs on a saved Steam **F12** screenshot with
 `--image captures\shot.jpg` (avoids the game's pause-on-focus-loss).
 
-**Poker is semi-automatic.** The overlay auto-reads everything it can — pot,
-street, active-opponent count, cost-to-call — and **auto-detects your hole
-cards**, which you confirm or correct by typing. Detection is a whole-card HOG +
-SVM classifier (~74% rank / ~84% suit on hole cards, colour-gated; see
-[POKER.md](POKER.md)) — good as a *seed* but not autonomous, so you confirm/fix
-it. A typed hand locks until the next deal (the hole slots emptying re-arms it):
+**Poker is semi-automatic.** It auto-reads pot, street, active-opponent count and
+cost-to-call, and **auto-detects your hole AND board cards** (whole-card HOG + SVM,
+colour-gated; ~74% rank / ~84% suit on hole, see [POKER.md](POKER.md)) — a *seed*
+you verify, not autonomous. **Use the launcher** (above) to correct cards by
+clicking; **Confirm hand** (or the Insert hotkey) banks a fully-correct read.
+Correcting one card banks only that card; Confirm banks the whole hand. The street
+follows the screen's community-card count; a paused game shows `PAUSED`.
 
-```powershell
-uv run python -m judgment_assist.app.live poker
-```
+The standalone CLI still exists (`uv run python -m judgment_assist.app.live poker`)
+where the overlay itself has a text box (type `3d 3c` = hole, `Qh 7c 2d` = board,
+`+ Td` = deal, `c` clear, `q` quit) — but the launcher GUI is the better path.
 
-One floating window shows the advice and has a text box for cards (no console).
-It reads e.g. `YOU 9c 8h  (detected ...)`; in the box: **Enter** confirms the
-detected hand, type two cards to fix the hole (`As Kd`), `| Qh 7c 2d` sets the
-board, `+ Td` deals a card, `c` clears, `Esc`/`q` quits. (Add `--no-overlay` to
-run headless in a console instead.)
-
-**It learns as you play.** Every hand you confirm (bare Enter) or correct (type
-the cards) is saved as a new labeled whole-card crop in `data/poker_cards` — the
-same format the detector reads — and hot-added to the running reader (refitting the
-SVM), so detection improves within the session and more on the next launch. Crops
-are taken from the last *live* frame, so correcting while the game is paused/tabbed
-away still grabs good pixels. Board cards you type are captured too; near-identical
-crops are deduped; `--no-learn` turns it off.
+**It learns as you play.** Each card you correct, and each hand you Confirm, is
+saved as a labeled whole-card crop in `data/poker_cards` (the format the detector
+reads) and hot-added to the running reader (refitting the SVM), so detection
+improves within the session and more on the next launch. Correcting one card banks
+only that card (not the rest of the hand); Confirm banks the whole verified hand.
+Crops come from the last *live* frame, so a correction during a pause still grabs
+good pixels; near-identical crops are deduped; `--no-learn` turns it off.
 
 It needs the `poker` ROIs, the white-on-plate digit glyphs (`--poker-digits`,
 default `data/poker_digits`), and the labeled whole-card crops used for detection

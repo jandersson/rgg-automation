@@ -124,6 +124,40 @@ classifiers are `LinearSVC`s (above). `torch` (CPU) was only ever used to *prove
 the card-reading wall during the CNN experiments and is **not used by any shipping
 code** — it can be dropped to slim the install.
 
+## Status — 2026-06-06 (launcher era)
+
+The whole thing is wired and in daily use. Architecture:
+
+- **`app/launcher.py` is the app for poker.** It runs the advisor **in-process**
+  (no subprocess), shows a **display-only** borderless overlay (`SuggestionOverlay`,
+  `master=`) over the game, and hosts the **Corrections** panel: per-card pickers in
+  two styles (Dropdowns / Card grid, `corr_mode` radio), a **Confirm hand** button,
+  a **Log** pane (stdout teed in), and a status line. Single-instance mutex (one
+  launcher, one overlay). Blackjack still launches as a subprocess.
+- **`app/live.py`** holds `PokerAdvisor` (state + detection + `text()`), the tk loop
+  (`_tick` in the launcher; `run()` for the standalone CLI), `grab_frame` (returns
+  None when the game window isn't found — never reads the desktop), `_screen_dimmed`
+  (PAUSED), and the global confirm hotkey (`_key_poller`, default **Insert**).
+- **Detection (`vision/poker_cards.py`):** whole-card HOG + LinearSVC, colour-gated
+  suit. Reads **hole and board**. ~74% rank / ~84% suit (hole, LOO); lower on fresh
+  sessions; advisory + corrected by the human.
+- **Learning:** `set_hole/set_board` only set state (no auto-bank). Banking is
+  explicit: `bank_card(kind, idx, card)` for ONE corrected card, `confirm()` for the
+  whole verified hand → `TrainingWriter` saves the whole-card crop + hot-adds to the
+  reader (SVM refit). Library `data/poker_cards` (gitignored).
+
+**Gotchas learned the hard way:** stray/old overlay processes hold `labels.json` in
+memory and resurrect deletions — kill ALL `python -m judgment_assist.app.live` procs
+before scrubbing `live*` entries. Don't run dev sessions with learning on against
+the real table (they bank crops). Corrections only valid when Judgment is actually
+on the table (else the read is garbage).
+
+**Last bug fixed (1aa36c3):** board could stick on "reading the board" when a
+flicker on a corrected slot blocked new community cards — now stability is over
+non-fixed slots + a patience fallback. **Watch next:** verify board detection
+accuracy on the live table (it misreads, e.g. 5♠→9s, on fresh sessions — the user
+corrects it, which trains it).
+
 ## Open issues / next
 
 - **#4** Poker equity overlay + chip OCR — **done** (chip/pot OCR, opponent
