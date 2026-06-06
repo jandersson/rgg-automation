@@ -88,6 +88,52 @@ def test_training_writer_saves_dedups_persists(tmp_path):
     assert len(PC.TrainingWriter(str(tmp_path)).labels) == 1                       # persisted
 
 
+def test_training_writer_reload_drops_resurrected_deletes(tmp_path):
+    # writer banks A, an external edit deletes it from labels.json, reload() must
+    # forget it so the writer's next save can't bring it back.
+    w = PC.TrainingWriter(str(tmp_path))
+    w.save(_whole("A", red=True), RANK_TO_INT["A"], SUIT_TO_INT["h"], "H0")
+    (tmp_path / "labels.json").write_text("{}")          # external delete-all
+    assert w.labels                                       # stale copy still has it
+    w.reload()
+    assert w.labels == {} and w._sigs == []               # synced -> won't resurrect
+
+
+def test_label_library_add_fix_skip_delete(tmp_path):
+    lib = PC.LabelLibrary(str(tmp_path))
+    key, path = lib.add(_whole("A", red=True), "cap1_1", "H0")   # captured, unlabeled
+    assert os.path.exists(path)
+    e, = lib.entries()
+    assert e["key"] == key and e["labeled"] is False and e["skip"] is False
+    lib.set_label(key, "A", "h")                          # letter suit -> full name
+    assert lib.labels[key] == {"rank": "A", "suit": "hearts"}
+    assert PC.LabelLibrary(str(tmp_path)).entries()[0]["labeled"] is True   # persisted
+    lib.set_skip(key)
+    assert lib.entries()[0]["skip"] is True
+    lib.delete(key)
+    assert lib.entries() == [] and not os.path.exists(path)   # crop gone too
+
+
+def test_label_library_is_dup(tmp_path):
+    lib = PC.LabelLibrary(str(tmp_path))
+    lib.add(_whole("A", red=True), "cap1_1", "H0", rank="A", suit="h")
+    assert lib.is_dup(_whole("A", red=True)) is True         # same crop already in
+    other = _whole("K", red=False).copy()
+    other[:, :139] = 20                                      # half-dark -> clearly distinct
+    assert lib.is_dup(other) is False
+
+
+def test_whole_card_crops_only_faceup_slots():
+    cfg = json.load(open("config/regions.json", encoding="utf-8"))["poker"]
+    frame = np.full((1080, 1920, 3), (70, 120, 40), np.uint8)   # green felt, no cards
+    assert PC.whole_card_crops(frame, cfg) == []
+    hx, hy = cfg["hole"][0]
+    frame[hy - 12:hy + 388, hx:hx + 278] = 235                  # one white card at hole 0
+    got = PC.whole_card_crops(frame, cfg)
+    assert [s for s, _ in got] == ["H0"]
+    assert got[0][1].shape[:2] == (PC._HOLE_CARD[3], PC._HOLE_CARD[2])   # native whole size
+
+
 def test_recrop_library_to_whole(tmp_path):
     cfg = json.load(open("config/regions.json", encoding="utf-8"))["poker"]
     hx, hy = cfg["hole"][0]

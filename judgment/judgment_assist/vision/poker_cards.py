@@ -83,29 +83,41 @@ class HoleCardReader:
         if not _HAVE:
             raise RuntimeError("card reader needs numpy + opencv")
         import threading
-        labels_path = os.path.join(card_dir, "labels.json")
-        if not os.path.exists(labels_path):
-            raise RuntimeError(
-                f"no labeled crops in {card_dir!r} — the hole-card reader needs "
-                f"labels.json + the whole-card PNGs (label --poker, then re-crop)")
-        labels = json.load(open(labels_path, encoding="utf-8"))
+        self._card_dir = card_dir
         self._hog = _hog()
         self._lock = threading.Lock()
-        self._X, self._rank, self._suit = [], [], []
+        self._load()
+
+    def _load(self):
+        """Read the labeled crop library from disk into the training set and (re)fit
+        the classifiers. Shared by ``__init__`` and :meth:`reload`."""
+        labels_path = os.path.join(self._card_dir, "labels.json")
+        if not os.path.exists(labels_path):
+            raise RuntimeError(
+                f"no labeled crops in {self._card_dir!r} — the hole-card reader needs "
+                f"labels.json + the whole-card PNGs (label --poker, then re-crop)")
+        labels = json.load(open(labels_path, encoding="utf-8"))
+        X, rank, suit = [], [], []
         for key, lab in labels.items():
             if lab.get("_skip") or "rank" not in lab:
                 continue
             frame, slot = key.split("#")
-            crop = cv2.imread(os.path.join(card_dir, f"{frame}_{slot}.png"))
+            crop = cv2.imread(os.path.join(self._card_dir, f"{frame}_{slot}.png"))
             if crop is None:
                 continue
-            self._X.append(_features(crop, self._hog))
-            self._rank.append(RANK_TO_INT[lab["rank"]])
-            self._suit.append(SUIT_TO_INT[_SUIT_LETTER[lab["suit"]]])
-        if not self._X:
-            raise RuntimeError(f"no usable exemplars in {card_dir!r}")
+            X.append(_features(crop, self._hog))
+            rank.append(RANK_TO_INT[lab["rank"]])
+            suit.append(SUIT_TO_INT[_SUIT_LETTER[lab["suit"]]])
+        if not X:
+            raise RuntimeError(f"no usable exemplars in {self._card_dir!r}")
+        self._X, self._rank, self._suit = X, rank, suit
         self._rank_clf = self._suit_clf = None
         self._fit()
+
+    def reload(self):
+        """Re-read the library from disk and refit — call after the Labels tab fixes,
+        skips or deletes crops so the running detector reflects the edits at once."""
+        self._load()
 
     def _fit(self):
         """(Re)train the rank + suit classifiers. Each is ('svc', clf) or, when
@@ -211,6 +223,19 @@ class TrainingWriter:
                 self._sigs.append(self._sig(im))
         self._seq, self._pid = 0, os.getpid()
 
+    def reload(self):
+        """Re-sync the in-memory labels + dedup signatures from disk. The Labels tab
+        edits labels.json directly; without this the writer would keep its stale copy
+        and, on the next bank, **resurrect a deleted entry** (the POKER.md gotcha)."""
+        self.labels = (json.load(open(self.labels_path, encoding="utf-8"))
+                       if os.path.exists(self.labels_path) else {})
+        self._sigs = []
+        for key in self.labels:
+            frame, slot = key.split("#")
+            im = cv2.imread(os.path.join(self.dir, f"{frame}_{slot}.png"))
+            if im is not None:
+                self._sigs.append(self._sig(im))
+
     def _sig(self, crop):
         return cv2.resize(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), (18, 26)).astype("int16")
 
@@ -231,6 +256,118 @@ class TrainingWriter:
         with open(self.labels_path, "w", encoding="utf-8") as f:
             json.dump(self.labels, f, indent=1)
         return path
+
+
+_SUIT_FULL = {"c": "clubs", "d": "diamonds", "h": "hearts", "s": "spades"}
+
+
+class LabelLibrary:
+    """Read/edit the poker label library — the crop PNGs + ``labels.json`` shared by
+    the offline labeler and the live ``TrainingWriter``. Pure file ops (no tk), so
+    the GUI Labels tab is a thin view over this and the logic is unit-tested.
+
+    A labels.json value is ``{"rank","suit"}`` (labeled), ``{"_skip": true}`` (a bad
+    crop excluded from training) or ``{}`` (captured but not yet labeled). Suits are
+    stored as full names ('clubs'…); ``set_label``/``add`` accept a letter too."""
+
+    def __init__(self, card_dir="data/poker_cards"):
+        if not _HAVE:
+            raise RuntimeError("label library needs numpy + opencv")
+        self.dir = card_dir
+        os.makedirs(card_dir, exist_ok=True)
+        self.labels_path = os.path.join(card_dir, "labels.json")
+        self.reload()
+
+    def reload(self):
+        self.labels = (json.load(open(self.labels_path, encoding="utf-8"))
+                       if os.path.exists(self.labels_path) else {})
+
+    def _save(self):
+        with open(self.labels_path, "w", encoding="utf-8") as f:
+            json.dump(self.labels, f, indent=1)
+
+    def _path(self, key):
+        frame, slot = key.split("#")
+        return os.path.join(self.dir, f"{frame}_{slot}.png")
+
+    def entries(self):
+        """Every label entry that still has a crop on disk, newest first by mtime.
+        Each: ``{key, frame, slot, path, rank, suit, skip, labeled, mtime}``."""
+        out = []
+        for key, lab in self.labels.items():
+            path = self._path(key)
+            if not os.path.exists(path):
+                continue
+            frame, slot = key.split("#")
+            out.append({"key": key, "frame": frame, "slot": slot, "path": path,
+                        "rank": lab.get("rank"), "suit": lab.get("suit"),
+                        "skip": bool(lab.get("_skip")), "labeled": "rank" in lab,
+                        "mtime": os.path.getmtime(path)})
+        return sorted(out, key=lambda e: e["mtime"], reverse=True)
+
+    def set_label(self, key, rank, suit):
+        """Fix/assign a crop's rank + suit (suit as 'c'/'d'/'h'/'s' or full name)."""
+        self.labels[key] = {"rank": rank, "suit": _SUIT_FULL.get(suit, suit)}
+        self._save()
+
+    def set_skip(self, key):
+        """Mark a crop ``_skip`` — kept on disk but excluded from training."""
+        self.labels[key] = {"_skip": True}
+        self._save()
+
+    def delete(self, key):
+        """Remove the label entry and its crop PNG from disk."""
+        self.labels.pop(key, None)
+        self._save()
+        path = self._path(key)
+        if os.path.exists(path):
+            os.remove(path)
+
+    def add(self, crop_bgr, frame_id, slot, rank=None, suit=None):
+        """Write a new whole-card crop (captured/imported) and its label entry —
+        ``{}`` when rank is omitted (to be labeled in the tab). Returns (key, path)."""
+        key, path = f"{frame_id}#{slot}", os.path.join(self.dir, f"{frame_id}_{slot}.png")
+        cv2.imwrite(path, cv2.resize(crop_bgr, _STORE))
+        self.labels[key] = ({"rank": rank, "suit": _SUIT_FULL.get(suit, suit)} if rank
+                            else {})
+        self._save()
+        return key, path
+
+    def is_dup(self, crop_bgr, thresh=7):
+        """True if a near-identical crop is already in the library (same dedup metric
+        the live writer uses) — so capture/import don't flood with repeats."""
+        sig = cv2.resize(cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY),
+                         (18, 26)).astype("int16")
+        for key in self.labels:
+            im = cv2.imread(self._path(key))
+            if im is None:
+                continue
+            s = cv2.resize(cv2.cvtColor(cv2.resize(im, _STORE), cv2.COLOR_BGR2GRAY),
+                           (18, 26)).astype("int16")
+            if float(np.mean(np.abs(sig - s))) < thresh:
+                return True
+        return False
+
+
+def whole_card_crops(frame_bgr, cfg):
+    """The whole-card crop of every currently face-up slot (2 hole + up to 5 board)
+    in a frame, for capturing new training crops. Gated on the bright corner (empty/
+    animating/dimmed slots are skipped), using the same geometry the live reader and
+    banker use. Returns ``[(slot, crop_bgr), …]``."""
+    from .poker import card_present
+    cw, ch = cfg["corner"]
+    slots = ([(f"H{i}", x, y) for i, (x, y) in enumerate(cfg.get("hole", []))] +
+             [(f"B{i}", x, y) for i, (x, y) in enumerate(cfg.get("board", []))])
+    out = []
+    for slot, x, y in slots:
+        corner = frame_bgr[y:y + ch, x:x + cw]
+        if corner.shape[:2] != (ch, cw) or not card_present(corner):
+            continue
+        l, t, w, h = whole_roi((x, y), slot)
+        whole = frame_bgr[t:t + h, l:l + w]
+        if whole.shape[:2] == (h, w):
+            out.append((slot, whole))
+    return out
 
 
 def recrop_library_to_whole(card_dir, frames_dir, config_path="config/regions.json"):
