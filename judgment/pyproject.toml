@@ -22,8 +22,18 @@ dev = ["pytest>=7.0"]
 [tool.setuptools]
 packages = ["judgment_assist"]
 
+# torch is GPU (CUDA 12.6) for the card-reading CNN experiments on an NVIDIA GPU.
+# `explicit = true` keeps this index for torch only; everything else resolves from
+# PyPI. torch+cu126 still runs on a CPU-only box (CUDA just reports unavailable),
+# so the project stays usable without a GPU — only the wheel is bigger. Swap the
+# url back to .../cpu for the small CPU wheel.
 [[tool.uv.index]]
-url = "https://download.pytorch.org/whl/cpu"
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
 
 [tool.pytest.ini_options]
 # Lets `from judgment_assist...` resolve without an install. The brains import
