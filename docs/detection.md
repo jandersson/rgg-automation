@@ -216,8 +216,8 @@ and the naive intuitions were wrong:
 - **Light photometric (brightness/contrast/small shift) — neutral/slight
   help.** This matches the real variation: lighting and sub-pixel ROI
   jitter. It's what tied HOG and what the ResNet trains on.
-- **Occlusion (Cutout / Random-Erasing) — the principled bet that didn't
-  pan out (yet).** Blanking random rectangles simulates a banner/tooltip/
+- **Occlusion (Cutout / Random-Erasing) — the answer was data, not aug.**
+  Blanking random rectangles simulates a banner/tooltip/
   neighbour covering part of the card — which *is* the live failure mode
   (POKER.md's "contamination"), so unlike geometric aug it matches the test
   distribution. Measured (grouped CV, ResNet34, clean vs synthetically
@@ -233,10 +233,17 @@ and the naive intuitions were wrong:
   Cutout backfired**: it *hurt clean* (96→80%) without helping occluded.
   Over-blanking only ~110 training images degrades the glyph signal the net
   needs, and a test band that happens to cover the rank index makes the card
-  unreadable *by anyone* (an information ceiling, not a model failure). The
-  fix isn't naive Cutout — it's *mild, banner-shaped* erasing **and real
-  obscured training examples** (deliberately capture them on the live
-  table). Open work.
+  unreadable *by anyone* (an information ceiling, not a model failure).
+
+  The fix wasn't Cutout — it was **labeling obscured cards from gameplay**.
+  ~140 partially-covered crops, mined by ``extract_obscured`` (felt-filtered to
+  drop dealing-animation/transition junk where the ROI spans the gap between
+  cards) and labeled in the Labels tab, were folded into training. Grouped CV on
+  held-out OBSCURED cards: the CNN reads them at **93.7% clean-trained, 96.5%
+  with the obscured examples added** — the pretrained features already handle
+  partial coverage, and the obscured data adds a few points on top. HOG manages
+  only ~39 → 45%. So occlusion robustness came from transfer learning plus a
+  modest obscured set, not from geometric augmentation.
 
 Corollary: aug strength must match model capacity. The aggressive
 photometric aug that *hurt* the tiny from-scratch net (90→74%) was
@@ -306,8 +313,9 @@ better than guessing among lookalikes. The ResNet barely dropped — it
 *actually generalises*. The takeaway: **always group by the real unit of
 variation (the physical card), or you're measuring memorisation.**
 
-Caveat that remains: even the grouped number is on *clean* crops. Robustness
-to **obscured** cards is the separate axis the Cutout experiment targets.
+That grouped number is on *clean* crops; the **obscured** axis (the augmentation
+section above) was settled separately — the CNN reads obscured cards at ~96%
+grouped, HOG at ~45%.
 
 ---
 
@@ -338,11 +346,13 @@ for a human to spot a genuine mislabel than any auto-flagger.
   training, instant.
 - **One reliable bit (card colour, fold/active):** a hand-designed pixel
   statistic + threshold. Use it to *gate* the hard classifier.
-- **Card rank, ships today, must hot-refit on correction:** HOG +
-  LinearSVC. ~68% on truly new cards, but instant retraining and no GPU.
-- **Card rank, highest accuracy, GPU acceptable:** fine-tuned pretrained
-  ResNet (224, TTA). ~98% on new cards, but a heavy dependency and no
-  millisecond refit.
+- **Card rank, default reader, highest accuracy:** fine-tuned pretrained
+  ResNet (224, TTA, `CnnCardReader`). ~98% new / ~96% obscured, validated
+  live; CPU inference is fine (~30 ms/card). Costs the torch dependency and
+  can't hot-refit mid-session.
+- **Card rank, learns-as-you-play / no torch:** HOG + LinearSVC. ~68% on
+  truly new cards, but it retrains instantly on each correction. The
+  selectable fallback, and the default when no CNN model file is present.
 - **Measuring any of the above:** group by physical card or the number is
   a lie.
 - **Finding bad labels:** sort by label and use your eyes; the kNN flag is

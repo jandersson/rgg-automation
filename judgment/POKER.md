@@ -1,9 +1,28 @@
 # Poker (Texas Hold'em) — status & findings
 
-Honest record of the poker track as of 2026-06-05. **Bottom line: the poker *brain*
-works and several *eyes* are reliable, but fully-automatic card reading is not
-achievable on this game — the realistic tool is semi-automatic (you type the cards,
-it reads the pot/odds).**
+Honest record of the poker track. **Bottom line (updated 2026-06-06): the brain
+works, the pot/street/fold eyes are reliable, and card reading — long "the wall" —
+is now solved by a transfer-learned CNN.** A fine-tuned ResNet34 reads ~98% rank
+on new cards and ~96% on obscured cards (leakage-free grouped CV), and held up
+live (~1 correction over several hands). It ships as the **default** reader; the
+HOG+SVM reader (which learns from your corrections as you play) is selectable. The
+"card reading can't work" sections below were true for HOG / from-scratch models
+and are kept for the record — read them with the update note in mind. Mechanism
+details: `docs/detection.md`.
+
+> **Update (2026-06-06) — the wall came down.** The conclusion below ("not reliable
+> enough, very likely never will be") was reached with template matching, SVMs, and
+> a from-scratch CNN, and with plain k-fold CV. Two things changed it:
+> 1. **The old ~80–90% numbers were inflated by data leakage** — the crop library has
+>    many near-duplicate frames of the same physical card, which landed in both train
+>    and test folds. Under *grouped* CV (same physical card kept in one fold) HOG
+>    collapses to **68.5% rank** on new cards (and ~45% on obscured) — it was largely
+>    memorising frames.
+> 2. **Transfer learning clears it.** A pretrained ResNet34, fine-tuned at 224px with
+>    light aug + TTA, reads **~98% rank / ~96% obscured** under the same grouped CV,
+>    and ~1-correction-over-several-hands live. The from-scratch CNN was the weak
+>    link, not the task. Shipped as `vision/cnn_cards.py` (`CnnCardReader`), default
+>    in the launcher, weights in `models/cnn_card.pt` (Git LFS).
 
 ## The brain — works today
 
@@ -21,8 +40,8 @@ uv run python -m judgment_assist.app.cli poker --hole "Ah Kh" --board "Qh 7h 2h"
 |---|---|---|
 | **Chip / pot OCR** | ✅ reliable | `HudReader.read(white=True)` — see below. Pot 0/20/80 read at 0.82–0.94. |
 | **Street detection** | ✅ reliable | `vision/poker.py` `street()` — counts board cards (preflop/flop/turn/river). Label-free. |
-| **Suit recognition** | ~90% | colour red/black = 100% (ink-pixel redness); within-colour shape ~good. |
-| **Card RANK recognition** | ⚠️ ~74% (advisory) | whole-card HOG+SVM; seeds the overlay for human correction, not autonomous — see below. |
+| **Suit recognition** | reliable | colour red/black ≈ 100% (ink-pixel redness), colour-gated; exact suit from the reader's suit head/classifier. |
+| **Card RANK recognition** | ✅ CNN ~98% / HOG 68.5% | leakage-free grouped CV on NEW cards. CNN (ResNet34, default) reads ~96% even on obscured cards; HOG ~45% obscured. HOG is the learns-as-you-play fallback. Numbers + the leakage story: see the update note above and `docs/detection.md`. |
 
 ### Chip/pot OCR (#4) — the reliable win
 
@@ -55,8 +74,13 @@ not random). Findings:
   there is NO HUD total to cross-check against). Even an optimistic 90% gives
   0.9⁷ ≈ 48% fully-correct hands. 80% is nowhere near, and there's no cheap path up.
 
-**Conclusion:** screen-scraped poker card reading on this game is not reliable enough
-for trustworthy hand advice, and very likely never will be.
+**Conclusion (SUPERSEDED — see the update note at the top):** with template
+matching / SVMs / a from-scratch CNN this read ~80%, not enough. But that ceiling
+was the *model and the leaky evaluation*, not the task: a transfer-learned ResNet34
+reads ~98% / ~96%-obscured (leakage-free), so screen-scraped card reading IS
+reliable enough now. The "thin samples / contamination" point still holds for the
+HOG reader and for clean training data, which is why obscured examples and the CNN
+both mattered.
 
 ## The realistic tool — semi-automatic
 
