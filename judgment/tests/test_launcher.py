@@ -131,8 +131,8 @@ def _crop():
 def _temp_lib(app, tmp):
     """Point the Labels tab at an isolated library so edit tests don't touch real data."""
     from judgment_assist.vision.poker_cards import LabelLibrary
-    app._lib = LabelLibrary(str(tmp))
-    app._reload_labels_list()
+    app.labels._lib = LabelLibrary(str(tmp))
+    app.labels._reload_labels_list()
 
 
 def test_launcher_has_play_and_labels_tabs():
@@ -154,7 +154,7 @@ def test_labels_tab_loads_whole_library_from_disk():
         pytest.skip("no label library on disk to load")
     root, app = _gui()
     try:
-        assert len(app.labels_tree.get_children()) > 0     # loaded at build time
+        assert len(app.labels.labels_tree.get_children()) > 0     # loaded at build time
     finally:
         root.destroy()
 
@@ -165,18 +165,18 @@ def test_labels_tab_live_bank_appends_labeled_row(tmp_path):
     root, app = _gui()
     try:
         _temp_lib(app, tmp_path)                   # empty isolated library
-        assert app.labels_tree.get_children() == ()
+        assert app.labels.labels_tree.get_children() == ()
         class _Adv:
             banked = [{"time": "02:55:24", "slot": "H0", "card": "Ac",
                        "path": str(tmp_path / "live9_1_H0.png")}]
         app._sess = {"advisor": _Adv()}
-        app._live_seen = 0
-        app._append_live_banks()
-        rows = [app.labels_tree.item(i, "values") for i in app.labels_tree.get_children()]
+        app.labels._live_seen = 0
+        app.labels.append_live_banks()
+        rows = [app.labels.labels_tree.item(i, "values") for i in app.labels.labels_tree.get_children()]
         assert rows == [("02:55:24", "Session", "Hole 1", "Ac", "")]   # labeled, NOT reviewed
-        assert app._labels_total == 1 and app._labels_reviewed == 0
-        app._append_live_banks()                   # idempotent
-        assert len(app.labels_tree.get_children()) == 1
+        assert app.labels._labels_total == 1 and app.labels._labels_reviewed == 0
+        app.labels.append_live_banks()                   # idempotent
+        assert len(app.labels.labels_tree.get_children()) == 1
     finally:
         app._sess = None
         root.destroy()
@@ -205,12 +205,12 @@ def test_capture_from_game_adds_unlabeled_crops(tmp_path):
         app._sess = {"grab": None, "cfg": {"poker": poker},
                      "grab_frame": lambda g, c: frame,
                      "advisor": type("A", (), {"banked": []})()}
-        app._capture_from_game()
-        caps = [k for k in app._lib.labels if k.startswith("cap")]
-        assert len(caps) == 1 and app._lib.labels[caps[0]] == {}   # captured, unlabeled
-        assert app._labels_needs == 1
-        app._capture_from_game()                       # same frame -> dedup, no new crop
-        assert sum(k.startswith("cap") for k in app._lib.labels) == 1
+        app.labels._capture_from_game()
+        caps = [k for k in app.labels._lib.labels if k.startswith("cap")]
+        assert len(caps) == 1 and app.labels._lib.labels[caps[0]] == {}   # captured, unlabeled
+        assert app.labels._labels_needs == 1
+        app.labels._capture_from_game()                       # same frame -> dedup, no new crop
+        assert sum(k.startswith("cap") for k in app.labels._lib.labels) == 1
     finally:
         app._sess = None
         root.destroy()
@@ -226,10 +226,10 @@ def test_import_frames_adds_unlabeled_crops(tmp_path):
     root, app = _gui()
     try:
         _temp_lib(app, tmp_path)
-        app._import_frames([str(fp)])
-        imps = [k for k in app._lib.labels if k.startswith("imp_")]
-        assert imps and all(app._lib.labels[k] == {} for k in imps)   # unlabeled
-        assert app._labels_needs == len(imps)
+        app.labels._import_frames([str(fp)])
+        imps = [k for k in app.labels._lib.labels if k.startswith("imp_")]
+        assert imps and all(app.labels._lib.labels[k] == {} for k in imps)   # unlabeled
+        assert app.labels._labels_needs == len(imps)
     finally:
         root.destroy()
 
@@ -241,23 +241,23 @@ def test_labels_tab_fix_skip_delete(tmp_path):
     root, app = _gui()
     try:
         _temp_lib(app, tmp_path)
-        app._confirm_delete = lambda key: True               # auto-confirm the delete
-        key, path = app._lib.add(_crop(), "cap1_1", "H0")    # captured, unlabeled
-        app._reload_labels_list()
-        assert app._labels_needs == 1                        # flagged as needing a label
-        app.labels_tree.selection_set(path)
-        app._edit_rank.set("A")
-        app._edit_suit.set("h")
-        app._save_label()
-        assert app._lib.labels[key] == {"rank": "A", "suit": "hearts", "reviewed": True}
-        assert app._labels_needs == 0 and app._labels_reviewed == 1
-        app.labels_tree.selection_set(path)
-        app._skip_label()
-        assert app._lib.labels[key] == {"_skip": True, "reviewed": True}
-        app.labels_tree.selection_set(path)
-        app._delete_label()
-        assert key not in app._lib.labels and not os.path.exists(path)
-        assert app.labels_tree.get_children() == ()
+        app.labels._confirm_delete = lambda key: True               # auto-confirm the delete
+        key, path = app.labels._lib.add(_crop(), "cap1_1", "H0")    # captured, unlabeled
+        app.labels._reload_labels_list()
+        assert app.labels._labels_needs == 1                        # flagged as needing a label
+        app.labels.labels_tree.selection_set(path)
+        app.labels._edit_rank.set("A")
+        app.labels._edit_suit.set("h")
+        app.labels._save_label()
+        assert app.labels._lib.labels[key] == {"rank": "A", "suit": "hearts", "reviewed": True}
+        assert app.labels._labels_needs == 0 and app.labels._labels_reviewed == 1
+        app.labels.labels_tree.selection_set(path)
+        app.labels._skip_label()
+        assert app.labels._lib.labels[key] == {"_skip": True, "reviewed": True}
+        app.labels.labels_tree.selection_set(path)
+        app.labels._delete_label()
+        assert key not in app.labels._lib.labels and not os.path.exists(path)
+        assert app.labels.labels_tree.get_children() == ()
     finally:
         root.destroy()
 
@@ -269,12 +269,12 @@ def test_delete_cancelled_keeps_crop(tmp_path):
     root, app = _gui()
     try:
         _temp_lib(app, tmp_path)
-        app._confirm_delete = lambda key: False              # user says No
-        key, path = app._lib.add(_crop(), "cap9_1", "H0", rank="A", suit="h")
-        app._reload_labels_list()
-        app.labels_tree.selection_set(path)
-        app._delete_label()
-        assert key in app._lib.labels and os.path.exists(path)   # untouched
+        app.labels._confirm_delete = lambda key: False              # user says No
+        key, path = app.labels._lib.add(_crop(), "cap9_1", "H0", rank="A", suit="h")
+        app.labels._reload_labels_list()
+        app.labels.labels_tree.selection_set(path)
+        app.labels._delete_label()
+        assert key in app.labels._lib.labels and os.path.exists(path)   # untouched
     finally:
         root.destroy()
 
@@ -296,13 +296,13 @@ def test_capture_prefills_detector_guess(tmp_path):
         app._sess = {"grab": None, "cfg": {"poker": poker},
                      "grab_frame": lambda g, c: frame,
                      "advisor": type("A", (), {"banked": [], "card_reader": _Reader()})()}
-        app._capture_from_game()
-        cap = next(k for k in app._lib.labels if k.startswith("cap"))
-        assert app._lib.labels[cap] == {"_guess": {"rank": "A", "suit": "hearts"}}
-        path = app._lib._path(cap)                            # selecting pre-fills pickers
-        app.labels_tree.selection_set(path)
-        app._show_label_crop()
-        assert app._edit_rank.get() == "A" and app._edit_suit.get() == "h"
+        app.labels._capture_from_game()
+        cap = next(k for k in app.labels._lib.labels if k.startswith("cap"))
+        assert app.labels._lib.labels[cap] == {"_guess": {"rank": "A", "suit": "hearts"}}
+        path = app.labels._lib._path(cap)                            # selecting pre-fills pickers
+        app.labels.labels_tree.selection_set(path)
+        app.labels._show_label_crop()
+        assert app.labels._edit_rank.get() == "A" and app.labels._edit_suit.get() == "h"
     finally:
         app._sess = None
         root.destroy()
@@ -314,19 +314,19 @@ def test_reviewed_count_and_hide_filter(tmp_path):
     root, app = _gui()
     try:
         _temp_lib(app, tmp_path)
-        u, pu = app._lib.add(_crop(), "cap1_1", "H0")                    # unlabeled
-        app._lib.add(_crop(), "frame_x", "B0", rank="K", suit="s")       # labeled/reviewed
-        app._reload_labels_list()
-        assert (app._labels_total, app._labels_needs, app._labels_reviewed) == (2, 1, 1)
-        app.labels_tree.selection_set(pu)
-        app._edit_rank.set("A")
-        app._edit_suit.set("h")
-        app._save_label()
-        assert (app._labels_needs, app._labels_reviewed) == (0, 2)
-        app._hide_reviewed.set(True)
-        app._reload_labels_list()
-        assert app.labels_tree.get_children() == ()           # both reviewed -> hidden
-        assert app._labels_total == 2 and app._labels_reviewed == 2   # counts still full
+        u, pu = app.labels._lib.add(_crop(), "cap1_1", "H0")                    # unlabeled
+        app.labels._lib.add(_crop(), "frame_x", "B0", rank="K", suit="s")       # labeled/reviewed
+        app.labels._reload_labels_list()
+        assert (app.labels._labels_total, app.labels._labels_needs, app.labels._labels_reviewed) == (2, 1, 1)
+        app.labels.labels_tree.selection_set(pu)
+        app.labels._edit_rank.set("A")
+        app.labels._edit_suit.set("h")
+        app.labels._save_label()
+        assert (app.labels._labels_needs, app.labels._labels_reviewed) == (0, 2)
+        app.labels._hide_reviewed.set(True)
+        app.labels._reload_labels_list()
+        assert app.labels.labels_tree.get_children() == ()           # both reviewed -> hidden
+        assert app.labels._labels_total == 2 and app.labels._labels_reviewed == 2   # counts still full
     finally:
         root.destroy()
 
@@ -358,7 +358,7 @@ def test_confirm_key_dispatches_by_active_tab(tmp_path):
     try:
         _temp_lib(app, tmp_path)
         calls = []
-        app._confirm_and_next = lambda: calls.append("labels")
+        app.labels.confirm_and_next = lambda: calls.append("labels")
         app._confirm_hotkey = lambda: calls.append("play")
         app.nb.select(app.tab_labels)
         app._on_confirm_key()                  # on Labels -> mark reviewed + next
@@ -377,10 +377,10 @@ def test_save_unchanged_label_confirms_without_refit(tmp_path):
     root, app = _gui()
     try:
         _temp_lib(app, tmp_path)
-        k, p = app._lib.add(_crop(), "frame_z", "B0", rank="K", suit="s")
-        app._lib.labels[k].pop("reviewed")            # start un-reviewed
-        app._lib._save()
-        app._reload_labels_list()
+        k, p = app.labels._lib.add(_crop(), "frame_z", "B0", rank="K", suit="s")
+        app.labels._lib.labels[k].pop("reviewed")            # start un-reviewed
+        app.labels._lib._save()
+        app.labels._reload_labels_list()
         refits = []
 
         class _Reader:
@@ -388,16 +388,16 @@ def test_save_unchanged_label_confirms_without_refit(tmp_path):
                 refits.append(1)
         app._sess = {"advisor": type("A", (), {"training": None,
                      "card_reader": _Reader(), "banked": []})()}
-        app._refit_var.set(True)
-        app.labels_tree.selection_set(p)
-        app._show_label_crop()                        # pickers pre-filled K / s
-        app._save_label()                             # unchanged
-        assert app._lib.labels[k]["reviewed"] is True
+        app.labels._refit_var.set(True)
+        app.labels.labels_tree.selection_set(p)
+        app.labels._show_label_crop()                        # pickers pre-filled K / s
+        app.labels._save_label()                             # unchanged
+        assert app.labels._lib.labels[k]["reviewed"] is True
         assert refits == []                           # no wasted refit
-        app.labels_tree.selection_set(p)
-        app._edit_rank.set("Q")                       # now actually change it
-        app._save_label()
-        assert app._lib.labels[k]["rank"] == "Q" and refits == [1]   # refit fired
+        app.labels.labels_tree.selection_set(p)
+        app.labels._edit_rank.set("Q")                       # now actually change it
+        app.labels._save_label()
+        assert app.labels._lib.labels[k]["rank"] == "Q" and refits == [1]   # refit fired
     finally:
         app._sess = None
         root.destroy()
@@ -409,18 +409,18 @@ def test_mark_reviewed_only_on_labeled(tmp_path):
     root, app = _gui()
     try:
         _temp_lib(app, tmp_path)
-        k, p = app._lib.add(_crop(), "frame_y", "B1", rank="Q", suit="d")
-        app._lib.labels[k].pop("reviewed")                    # start un-reviewed
-        app._lib._save()
-        app._reload_labels_list()
-        assert app._labels_reviewed == 0
-        app.labels_tree.selection_set(p)
-        app._mark_reviewed()
-        assert app._lib.labels[k].get("reviewed") is True
-        ku, pu = app._lib.add(_crop(), "cap2_1", "H0")        # unlabeled -> refused
-        app._reload_labels_list()
-        app.labels_tree.selection_set(pu)
-        app._mark_reviewed()
-        assert "reviewed" not in app._lib.labels[ku]
+        k, p = app.labels._lib.add(_crop(), "frame_y", "B1", rank="Q", suit="d")
+        app.labels._lib.labels[k].pop("reviewed")                    # start un-reviewed
+        app.labels._lib._save()
+        app.labels._reload_labels_list()
+        assert app.labels._labels_reviewed == 0
+        app.labels.labels_tree.selection_set(p)
+        app.labels._mark_reviewed()
+        assert app.labels._lib.labels[k].get("reviewed") is True
+        ku, pu = app.labels._lib.add(_crop(), "cap2_1", "H0")        # unlabeled -> refused
+        app.labels._reload_labels_list()
+        app.labels.labels_tree.selection_set(pu)
+        app.labels._mark_reviewed()
+        assert "reviewed" not in app.labels._lib.labels[ku]
     finally:
         root.destroy()
