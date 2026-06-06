@@ -107,6 +107,24 @@ def summarize(o):
             f"{where.capitalize()}, re-reading the screen every {o['interval']}s.")
 
 
+def _save_tick_error(tb, frame):
+    """Dump a tick traceback (and the frame that triggered it) to
+    ``data/_tick_err/`` so an intermittent read crash can be reproduced offline.
+    Best-effort: any failure here is swallowed so it can't break the loop."""
+    try:
+        import time
+        d = ROOT / "data" / "_tick_err"
+        d.mkdir(parents=True, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        (d / f"{ts}.txt").write_text(tb, encoding="utf-8")
+        if frame is not None and getattr(frame, "size", 0):
+            import cv2
+            cv2.imwrite(str(d / f"{ts}.png"), frame)
+        print(f"  (saved tick-error frame + traceback to data/_tick_err/{ts}.*)")
+    except Exception:                             # noqa: BLE001
+        pass
+
+
 class _GuiWriter:
     """A stdout stand-in that appends to a tk Text widget (and mirrors to the real
     stdout if there is one). Writes happen on the tk thread, so direct update is
@@ -555,6 +573,7 @@ class LauncherApp:
         # A throw anywhere below used to skip the reschedule and FREEZE the overlay
         # (e.g. it got stuck on "reading the board" if a card read raised). Guard the
         # whole frame and always reschedule, so one bad frame just gets retried.
+        frame = None
         try:
             frame = s["grab_frame"](s["grab"], s["cfg"])
             if frame is None or frame.size == 0 or min(frame.shape[:2]) < 10:
@@ -569,8 +588,13 @@ class LauncherApp:
             self.labels.append_live_banks()
         except Exception as e:                    # noqa: BLE001 - keep the loop alive
             import traceback
+            tb = traceback.format_exc()
             print(f"  tick error (recovered, retrying): {e}")
-            traceback.print_exc()
+            print(tb)
+            # Persist the traceback AND the offending full-res frame so an
+            # intermittent, data-specific read crash can be reproduced exactly
+            # later (the Log pane isn't on disk). Best-effort; never re-raises.
+            _save_tick_error(tb, frame)
             try:
                 s["overlay"].update_text((s.get("last") or "(reading...)")
                                          + f"\n(read hiccup: {e})")
