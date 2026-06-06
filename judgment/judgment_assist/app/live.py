@@ -503,7 +503,10 @@ class PokerAdvisor:
             board_fixed = set(self._board_fixed)
 
         st = P.table_state(frame, self.cfg, self.reader)
-        pot, to_call = st["pot"] or 0, st["to_call"]
+        # Use the WHOLE contested pot (swept pot + this round's live bets), not the
+        # central pot plate alone — preflop the plate reads 0 while the blinds/calls
+        # sit in front of the players, which made pot-odds 100% and folded premiums.
+        pot, to_call = st["pot_total"] or 0, st["to_call"]
         # The street follows the SCREEN's community-card count (reliable), so it
         # advances flop->turn->river as the game does. When you haven't typed the
         # board yet it's "behind" — we show the real street and nudge you to enter

@@ -97,3 +97,32 @@ def test_table_state_combines_reads_and_folds():
     assert st["street"] == "river" and st["pot"] == 225
     assert st["opp_active"] == [False, True, False] and st["n_active"] == 1
     assert st["to_call"] == 0                      # only live bet 70 < hero's 80
+    # pot_total adds this round's live bets to the swept plate (225 + 80 + 70 = 375)
+    assert st["committed"] == 150 and st["pot_total"] == 375
+
+
+def test_pot_total_includes_live_bets_when_plate_is_zero():
+    """The bug: preflop the central pot plate reads 0 (bets sit in front of the
+    players), so pricing the call against the plate alone made pot-odds 100% and
+    folded even pocket aces. pot_total must include the live bets."""
+    class FakeReader:   # the pocket-tens screenshot: pot plate 0, blinds/calls out
+        def read_roi(self, frame, roi, white=False):
+            return {"pot": 0, "my": 2, "o0": 5, "o1": 5, "o2": 0}[roi], 1.0
+
+    cfg = {"corner": CFG["corner"], "board": CFG["board"],
+           "pot": "pot", "bet": "my", "opp_bet": ["o0", "o1", "o2"],
+           "opp_banner": [[0, 0, 95, 42], [100, 0, 95, 42], [200, 0, 95, 42]]}
+    frame = _deal(_felt(), 0)                      # preflop, no community cards
+    frame[0:42, 200:295] = _banner(102)           # opp2 folded (the dealer)
+    st = P.table_state(frame, cfg, FakeReader())
+    assert st["pot"] == 0                           # plate is empty preflop...
+    assert st["pot_total"] == 12                    # ...but 2 + 5 + 5 is contested
+    assert st["to_call"] == 3                       # max active bet 5 - hero's 2
+
+    # and the advice that flows from it must not fold pocket tens getting 3-to-12.
+    from judgment_assist.cards import parse_cards
+    from judgment_assist.poker.advisor import decide
+    from judgment_assist.poker.equity import equity
+    eq = equity(parse_cards("Ts Tc"), (), opponents=st["n_active"], iters=3000, seed=1)
+    out = decide(eq, to_call=st["to_call"], pot=st["pot_total"])
+    assert out["recommendation"] != "fold"

@@ -123,8 +123,19 @@ def table_state(frame, cfg, reader):
     active = opp_active(frame, cfg)
     my_bet = reader.read_roi(frame, cfg["bet"], white=True)[0]
     pot = reader.read_roi(frame, cfg["pot"], white=True)[0]
+    # The central pot plate only holds chips SWEPT from previous streets — it reads
+    # 0 preflop, because this round's bets still sit in front of each player (their
+    # Bet plates). Pot odds must price the call against the whole contested pot, so
+    # ``pot_total`` adds the live bets (everyone's, folded included — it's all dead
+    # money the winner takes). This stays continuous across the street sweep: when
+    # the bets reset to 0 the pot plate rises by the same amount, so the total
+    # doesn't jump. Without it the advisor saw pot 0 preflop -> pot-odds 100% ->
+    # folded even premium hands.
+    committed = (my_bet or 0) + sum(b for b in bets if b is not None)
     return {
         "pot": pot,
+        "committed": committed,
+        "pot_total": (pot or 0) + committed,
         "board": n,
         "street": _STREET.get(n, f"{n} board"),
         "opp_bets": bets,
