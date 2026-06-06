@@ -98,3 +98,45 @@ def test_common_flags_always_present():
     for flag, val in (("--config", "config/regions.json"), ("--interval", "0.5"),
                       ("--min-confidence", "0.7"), ("--x", "100"), ("--y", "200")):
         assert argv[argv.index(flag) + 1] == val
+
+
+def _gui():
+    """Build a LauncherApp on a hidden root, or skip if there's no display."""
+    import pytest
+    tk = pytest.importorskip("tkinter")
+    from judgment_assist.app.launcher import LauncherApp
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display for tkinter")
+    root.withdraw()
+    return root, LauncherApp(root)
+
+
+def test_launcher_has_play_and_review_tabs():
+    root, app = _gui()
+    try:
+        assert [app.nb.tab(t, "text") for t in app.nb.tabs()] == ["Play", "Review"]
+    finally:
+        root.destroy()
+
+
+def test_review_tab_lists_banked_cards_newest_first():
+    root, app = _gui()
+    try:
+        class _Adv:                                # stands in for a running advisor
+            banked = [{"time": "02:55:24", "slot": "H0", "card": "Ac", "path": None},
+                      {"time": "02:55:25", "slot": "H1", "card": "Ts", "path": None}]
+        app._sess = {"advisor": _Adv()}
+        app._review_seen = 0
+        app._refresh_review()
+        rows = [app.review_tree.item(i, "values") for i in app.review_tree.get_children()]
+        assert rows == [("02:55:25", "Hole 2", "Ts"), ("02:55:24", "Hole 1", "Ac")]
+        assert app._review_count.cget("text") == "2 banked"
+        app._refresh_review()                      # idempotent: no duplicate rows
+        assert len(app.review_tree.get_children()) == 2
+        app._clear_review()                        # clears the list only
+        assert app.review_tree.get_children() == ()
+    finally:
+        app._sess = None
+        root.destroy()

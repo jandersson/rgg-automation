@@ -216,20 +216,21 @@ class TrainingWriter:
 
     def save(self, card_bgr, rank_int, suit_int, slot):
         """Write one labeled whole-card crop unless a near-identical one exists.
-        Returns True if a new exemplar was written."""
+        Returns the written PNG path (truthy) on a new exemplar, else ``None`` — the
+        path lets the GUI's review tab show the crop that was banked."""
         sig = self._sig(card_bgr)
         if any(float(np.mean(np.abs(sig - s))) < self.dedup for s in self._sigs):
-            return False
+            return None
         self._seq += 1
         fid = f"live{self._pid}_{self._seq}"
-        cv2.imwrite(os.path.join(self.dir, f"{fid}_{slot}.png"),
-                    cv2.resize(card_bgr, _STORE))
+        path = os.path.join(self.dir, f"{fid}_{slot}.png")
+        cv2.imwrite(path, cv2.resize(card_bgr, _STORE))
         self.labels[f"{fid}#{slot}"] = {"rank": INT_TO_RANK[rank_int],
                                         "suit": _SUIT_NAME[suit_int]}
         self._sigs.append(sig)
         with open(self.labels_path, "w", encoding="utf-8") as f:
             json.dump(self.labels, f, indent=1)
-        return True
+        return path
 
 
 def recrop_library_to_whole(card_dir, frames_dir, config_path="config/regions.json"):

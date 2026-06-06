@@ -155,6 +155,16 @@ class LauncherApp:
         root.title("RGG advisor launcher")
         root.resizable(False, False)
 
+        # Two tabs: "Play" (the setup form + live corrections + log) and "Review"
+        # (the confirmed/corrected cards banked this session, so you can check what
+        # got learned). The body widgets below live on the Play tab, not root.
+        self.nb = ttk.Notebook(root)
+        self.nb.grid(row=0, column=0, sticky="nsew")
+        self.tab_play = ttk.Frame(self.nb)
+        self.tab_review = ttk.Frame(self.nb)
+        self.nb.add(self.tab_play, text="Play")
+        self.nb.add(self.tab_review, text="Review")
+
         self.v = {
             "game": tk.StringVar(value=DEFAULTS["game"]),
             "config": tk.StringVar(value=DEFAULTS["config"]),
@@ -177,8 +187,9 @@ class LauncherApp:
             var.trace_add("write", lambda *_: self._refresh())
 
         pad = {"padx": 8, "pady": 3}
+        body = self.tab_play
         # game selector
-        gf = ttk.LabelFrame(root, text="Game")
+        gf = ttk.LabelFrame(body, text="Game")
         gf.grid(row=0, column=0, sticky="ew", **pad)
         for i, g in enumerate(("poker", "blackjack")):
             ttk.Radiobutton(gf, text=g.capitalize(), value=g,
@@ -187,7 +198,7 @@ class LauncherApp:
                    colspan=3)
 
         # the overlay (one window: advice + the card-entry box)
-        ov = ttk.LabelFrame(root, text="Overlay")
+        ov = ttk.LabelFrame(body, text="Overlay")
         ov.grid(row=1, column=0, sticky="ew", **pad)
         self._help(ov, 0, "A floating box over the game shows the advice (display only). "
                           "Poker card corrections happen here in the launcher, below.")
@@ -199,7 +210,7 @@ class LauncherApp:
         self._help(ov, 2, "Or just drag the box to where you want it once it opens.")
 
         # poker options
-        self.pf = ttk.LabelFrame(root, text="Poker options")
+        self.pf = ttk.LabelFrame(body, text="Poker options")
         self.pf.grid(row=2, column=0, sticky="ew", **pad)
         ttk.Checkbutton(self.pf, text="Auto-detect my hole cards",
                         variable=self.v["detect"]).grid(row=0, column=0, columnspan=4, sticky="w", **pad)
@@ -220,7 +231,7 @@ class LauncherApp:
                                "controller back button to it. f13-f24/home/end/... ; blank = off.")
 
         # blackjack options
-        self.bf = ttk.LabelFrame(root, text="Blackjack options")
+        self.bf = ttk.LabelFrame(body, text="Blackjack options")
         self.bf.grid(row=3, column=0, sticky="ew", **pad)
         ttk.Label(self.bf, text="Decks in the shoe").grid(row=0, column=0, sticky="w", **pad)
         ttk.Entry(self.bf, textvariable=self.v["decks"], width=5).grid(row=0, column=1, sticky="w", **pad)
@@ -235,7 +246,7 @@ class LauncherApp:
         self._help(self.bf, 6, "Optional - leave blank to skip; e.g. hands.csv.")
 
         # advanced / rarely-changed settings
-        adv = ttk.LabelFrame(root, text="Advanced (defaults are usually fine)")
+        adv = ttk.LabelFrame(body, text="Advanced (defaults are usually fine)")
         adv.grid(row=4, column=0, sticky="ew", **pad)
         ttk.Label(adv, text="Re-read the screen every").grid(row=0, column=0, sticky="w", **pad)
         ttk.Entry(adv, textvariable=self.v["interval"], width=5).grid(row=0, column=1, sticky="w")
@@ -249,14 +260,14 @@ class LauncherApp:
         self._help(adv, 4, "The screen regions from the one-time calibration step (regions.json).")
 
         # command preview + status
-        self.preview = tk.Text(root, height=5, width=52, wrap="word",
+        self.preview = tk.Text(body, height=5, width=52, wrap="word",
                                bg="#101010", fg="#39ff14", font=("Consolas", 9))
         self.preview.grid(row=5, column=0, sticky="ew", **pad)
         self.preview.configure(state="disabled")
-        self.status = ttk.Label(root, text="", foreground="#a00")
+        self.status = ttk.Label(body, text="", foreground="#a00")
         self.status.grid(row=6, column=0, sticky="w", **pad)
 
-        bf = ttk.Frame(root)
+        bf = ttk.Frame(body)
         bf.grid(row=7, column=0, sticky="ew", **pad)
         ttk.Button(bf, text="Launch overlay", command=self.on_launch).grid(row=0, column=0, **pad)
         ttk.Button(bf, text="Stop overlay", command=self.on_stop).grid(row=0, column=1, **pad)
@@ -266,15 +277,17 @@ class LauncherApp:
         self._sess = None
         self._pollers = set()        # confirm-hotkey VKs already being polled
         self.corr_mode = tk.StringVar(value="dropdown")
-        self._build_corrections(root, row=8)
+        self._build_corrections(body, row=8)
 
         # log pane: session output (learning, errors) instead of a console
-        lf = ttk.LabelFrame(root, text="Log")
+        lf = ttk.LabelFrame(body, text="Log")
         lf.grid(row=9, column=0, sticky="ew", **pad)
         self.log = tk.Text(lf, height=6, width=52, wrap="word", bg="#0a0a0a",
                            fg="#cccccc", font=("Consolas", 8), state="disabled")
         self.log.pack(fill="both", expand=True, padx=4, pady=4)
         self._orig_stdout = None
+
+        self._build_review(self.tab_review)
 
         self.v["game"].trace_add("write", lambda *_: self._toggle())
         self.corr_mode.trace_add("write", lambda *_: self._show_corr_mode())
@@ -440,6 +453,7 @@ class LauncherApp:
                 pass
         advisor = PokerAdvisor(reader, roi, opp_fallback=o["opp"], iters=o["iters"],
                                card_reader=card_reader, training=training)
+        self._review_seen = 0          # read this fresh advisor's bank log from the top
         grab = ScreenGrabber(monitor=cfg.get("monitor", 1))
         grab.__enter__()
         overlay = SuggestionOverlay(master=self.root, input_enabled=False,
@@ -492,6 +506,7 @@ class LauncherApp:
             s["last"] = text
         s["overlay"].update_text(text)
         self._refresh_corrections()
+        self._refresh_review()
         self.root.after(s["interval"], self._tick)
 
     def _stop_session(self):
@@ -647,6 +662,104 @@ class LauncherApp:
             lab = ("H" if cell["kind"] == "H" else "B") + str(cell["idx"] + 1)
             txt = (INT_TO_RANK[card[0]] + INT_TO_SUIT[card[1]]) if present else "-"
             self._slotbtns[i].configure(text=f"{lab}:{txt}")
+
+    # -------------------------------------------------------- Review tab -------
+    _SLOT_HUMAN = {"H0": "Hole 1", "H1": "Hole 2", "B0": "Board 1", "B1": "Board 2",
+                   "B2": "Board 3", "B3": "Board 4", "B4": "Board 5"}
+
+    def _build_review(self, parent):
+        """The Review tab: every card banked this session (confirmed or corrected),
+        newest first, with a click-to-preview of the actual crop that was learned —
+        so you can spot a wrong label that got saved. List only; the data lives in
+        data/poker_cards."""
+        tk, ttk = self.tk, self.ttk
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(1, weight=1)
+        top = ttk.Frame(parent)
+        top.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=6)
+        ttk.Label(top, text="Cards banked this session (newest first). Click a row to "
+                  "see the crop that was learned and check the label.",
+                  foreground="#555", font=("Segoe UI", 9), wraplength=460
+                  ).grid(row=0, column=0, columnspan=3, sticky="w")
+        ttk.Button(top, text="Open data folder", command=self._open_cards_dir
+                   ).grid(row=1, column=0, pady=4, sticky="w")
+        ttk.Button(top, text="Clear list", command=self._clear_review
+                   ).grid(row=1, column=1, padx=6)
+        self._review_count = ttk.Label(top, text="0 banked", foreground="#070")
+        self._review_count.grid(row=1, column=2, padx=8)
+
+        cols = ("time", "slot", "card")
+        self.review_tree = ttk.Treeview(parent, columns=cols, show="headings", height=12)
+        for c, w in (("time", 90), ("slot", 90), ("card", 80)):
+            self.review_tree.heading(c, text=c.capitalize())
+            self.review_tree.column(c, width=w, anchor="center")
+        self.review_tree.grid(row=1, column=0, sticky="nsew", padx=(8, 0))
+        sb = ttk.Scrollbar(parent, orient="vertical", command=self.review_tree.yview)
+        sb.grid(row=1, column=1, sticky="ns")
+        self.review_tree.configure(yscrollcommand=sb.set)
+        self.review_tree.bind("<<TreeviewSelect>>", lambda e: self._show_review_crop())
+
+        self._review_preview = ttk.Label(
+            parent, text="(select a row to preview the learned crop)",
+            foreground="#888", compound="top")
+        self._review_preview.grid(row=2, column=0, columnspan=2, pady=8)
+        self._review_img = None          # keep a ref so tk doesn't GC the PhotoImage
+        self._review_seen = 0            # how many of advisor.banked we've shown
+        self._review_paths = {}          # tree item id -> crop path on disk
+
+    def _refresh_review(self):
+        """Pull any newly-banked exemplars from the running advisor into the tab
+        (newest at the top). Cheap: only the new tail is inserted each tick."""
+        s = self._sess
+        if not s:
+            return
+        banked = s["advisor"].banked
+        while self._review_seen < len(banked):
+            b = banked[self._review_seen]
+            self._review_seen += 1
+            slot = self._SLOT_HUMAN.get(b["slot"], b["slot"])
+            item = self.review_tree.insert("", 0, values=(b["time"], slot, b["card"]))
+            if b.get("path"):
+                self._review_paths[item] = b["path"]
+        n = len(self.review_tree.get_children())
+        self._review_count.configure(text=f"{n} banked")
+
+    def _show_review_crop(self):
+        sel = self.review_tree.selection()
+        if not sel:
+            return
+        path = self._review_paths.get(sel[0])
+        vals = self.review_tree.item(sel[0], "values")
+        if not path or not os.path.exists(path):
+            self._review_img = None
+            self._review_preview.configure(image="", text="(crop not on disk)")
+            return
+        try:
+            img = self.tk.PhotoImage(file=path)      # Tk 8.6 reads PNG natively
+            self._review_img = img                   # hold the ref
+            self._review_preview.configure(image=img, text=f"{vals[1]}  =  {vals[2]}")
+        except Exception as e:                        # noqa: BLE001
+            self._review_img = None
+            self._review_preview.configure(image="", text=f"(can't load crop: {e})")
+
+    def _open_cards_dir(self):
+        d = ROOT / "data" / "poker_cards"
+        try:
+            if os.name == "nt":
+                os.startfile(str(d))                  # noqa: S606
+            else:
+                subprocess.Popen(["xdg-open", str(d)])
+        except Exception as e:                        # noqa: BLE001
+            self.status.configure(text=f"can't open folder: {e}", foreground="#a00")
+
+    def _clear_review(self):
+        """Clear the Review LIST only — the saved crops/labels on disk are untouched."""
+        for item in self.review_tree.get_children():
+            self.review_tree.delete(item)
+        self._review_paths.clear()
+        self._review_img = None
+        self._review_preview.configure(image="", text="(select a row to preview the learned crop)")
+        self._review_count.configure(text="0 banked")
 
 
 _MUTEX_NAME = "rgg-advisor-launcher"

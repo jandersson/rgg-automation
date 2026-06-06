@@ -3,6 +3,7 @@
 Construction loads the labeled crop library (gitignored data), so these tests
 build readers from injected synthetic whole-card crops instead."""
 import json
+import os
 import threading
 
 import pytest
@@ -77,17 +78,17 @@ def test_add_exemplar_grows_and_refits():
 def test_training_writer_saves_dedups_persists(tmp_path):
     w = PC.TrainingWriter(str(tmp_path))
     card = _whole("A", red=True)
-    assert w.save(card, RANK_TO_INT["A"], SUIT_TO_INT["h"], "H0") is True
+    path = w.save(card, RANK_TO_INT["A"], SUIT_TO_INT["h"], "H0")
+    assert path and path.endswith("_H0.png") and os.path.exists(path)   # returns the crop path
     (key, val), = json.load(open(tmp_path / "labels.json")).items()
     assert val == {"rank": "A", "suit": "hearts"} and key.endswith("#H0")
     saved_png = next(tmp_path.glob("*_H0.png"))
     assert cv2.imread(str(saved_png)).shape[:2] == (PC._STORE[1], PC._STORE[0])   # stored whole-card
-    assert w.save(card, RANK_TO_INT["A"], SUIT_TO_INT["h"], "H0") is False        # dedup
+    assert w.save(card, RANK_TO_INT["A"], SUIT_TO_INT["h"], "H0") is None         # dedup
     assert len(PC.TrainingWriter(str(tmp_path)).labels) == 1                       # persisted
 
 
 def test_recrop_library_to_whole(tmp_path):
-    import os
     cfg = json.load(open("config/regions.json", encoding="utf-8"))["poker"]
     hx, hy = cfg["hole"][0]
     frame = np.full((1080, 1920, 3), (70, 120, 40), np.uint8)

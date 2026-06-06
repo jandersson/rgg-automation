@@ -307,6 +307,8 @@ class PokerAdvisor:
         self._board_wait = 0              # frames the board read hasn't stabilised
         self._good_frame = None           # last LIVE (cards-present) frame, for capture
         self._key = self._eq = None
+        self.banked = []                  # review log: every new exemplar written
+                                          # ({time, slot, card, path}), for the GUI
 
     # -- hero input ----------------------------------------------------------
     # NOTE: set_hole/set_board only update the hand STATE (for equity/display) and
@@ -389,9 +391,14 @@ class PokerAdvisor:
         if whole.shape[:2] != (h, w):
             return None
         rank, suit = card
-        if self.training.save(whole, rank, suit, f"{kind}{idx}"):
+        saved = self.training.save(whole, rank, suit, f"{kind}{idx}")
+        if saved:
             if self.card_reader is not None:
                 self.card_reader.add_exemplar(whole, rank, suit)
+            with self._lock:
+                self.banked.append({"time": time.strftime("%H:%M:%S"),
+                                    "slot": f"{kind}{idx}", "card": card_str(card),
+                                    "path": saved if isinstance(saved, str) else None})
             return card_str(card)
         return None
 
