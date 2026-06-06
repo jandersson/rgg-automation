@@ -533,6 +533,7 @@ class PokerAdvisor:
         # Use the WHOLE contested pot (swept pot + this round's live bets), not the
         # central pot plate alone — preflop the plate reads 0 while the blinds/calls
         # sit in front of the players, which made pot-odds 100% and folded premiums.
+        plate, committed = st["pot"] or 0, st["committed"]
         pot, to_call = st["pot_total"] or 0, st["to_call"]
         # The street follows the SCREEN's community-card count (reliable), so it
         # advances flop->turn->river as the game does. When you haven't typed the
@@ -549,7 +550,13 @@ class PokerAdvisor:
         n_auto = st["n_active"] if st["opp_active"] else None
         opp = n_auto if n_auto is not None else self.opp_fallback
         opp_src = "active" if n_auto is not None else "set"
-        live = f"POT {pot}  {stage.upper()}  vs {opp} {opp_src}  to-call {to_call}"
+        # Show the pot breakdown when live bets are in front of players: the central
+        # plate only holds chips SWEPT from earlier streets, so "POT 325 (175+150)"
+        # reads as plate 175 + this round's live bets 150. If it ever shows
+        # "(175+0)" the opponents' Bet plates aren't being read — the pot is then
+        # undercounted and pot-odds run too tight (the thing to chase).
+        pot_str = f"{pot} ({plate}+{committed})" if committed else f"{pot}"
+        live = f"POT {pot_str}  {stage.upper()}  vs {opp} {opp_src}  to-call {to_call}"
         if len(hole) != 2:
             hint = "type your hole cards  e.g.  Ah Kh" if self.card_reader is None \
                 else "waiting for your hole cards (deal in)..."

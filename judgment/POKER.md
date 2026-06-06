@@ -188,3 +188,31 @@ corrects it, which trains it).
   bet + fold reading → to_call, and the semi-auto live overlay).
 - **#5** tilted/overlapping fan recognition — N/A for poker (flat cards); the poker
   card wall is contamination + sample size, a different problem.
+
+## High-stakes variant + the pot-breakdown overlay (2026-06-06)
+
+The high-stakes poker table uses the **same layout** as the regular one — only the
+numbers are bigger (e.g. Raise 150 / Call 100, blinds 50/100). All ROIs and the
+CNN reader carry over unchanged.
+
+The central **pot plate** shows only chips **swept** from earlier betting rounds.
+Each player's current-round bet sits in front of them (the per-seat **Bet** plate)
+until the street ends and the chips are raked in. So mid-street the plate reads
+*less* than the contested pot — and preflop it reads 0. `table_state` already
+returns `pot_total = pot (plate) + committed (my_bet + Σ opp Bet)`; the advisor
+prices pot-odds against `pot_total` (the preflop-fold fix, 113383f).
+
+The overlay now shows the breakdown so this is legible: **`POT 325 (175+150)`** =
+plate 175 + this round's live bets 150.
+
+**Open diagnostic:** a session showed the overlay POT as bare **175** when it should
+have been ~325 (plate 175 + bets 150). That means `committed` came out 0 → the
+opponents' **Bet** plates read as `None`/0 for that frame, so the pot was
+undercounted and pot-odds ran too tight. With the breakdown line, a recurrence now
+shows as **`POT 175 (175+0)`** — if that appears, the `opp_bet` OCR (`read_opp_bets`
+→ `HudReader.read_roi(..., white=True)`) isn't reading the high-stakes Bet plates.
+Next step: capture a full-res frame on the high-stakes table where `(plate+0)`
+appears, run `table_state` on it, and inspect each `opp_bet` ROI read (alignment vs
+the bigger numbers, or the digit templates missing a glyph). Note Steam's F12
+captures the **game**, not the floating overlay — so to see what the overlay
+computed, read it off the breakdown line / Log pane, not from a screenshot.
