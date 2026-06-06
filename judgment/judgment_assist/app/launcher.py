@@ -899,13 +899,14 @@ class LauncherApp:
             self.labels_tree.see(select)
 
     def _append_live_banks(self):
-        """Per-tick: add the running advisor's freshly-banked crops at the top
-        (already reviewed — they came from a play confirm), without a disk rescan."""
+        """Per-tick: add the running advisor's freshly-banked crops at the top. These
+        are labeled but NOT reviewed — confirming in play isn't a deliberate label
+        check — so they stay visible (the worklist for the Labels-tab second pass)
+        and the 'Hide reviewed' filter never hides them."""
         s = self._sess
         if not s:
             return
         banked = s["advisor"].banked
-        hide = self._hide_reviewed.get()
         changed = False
         while self._live_seen < len(banked):
             b = banked[self._live_seen]
@@ -914,12 +915,9 @@ class LauncherApp:
             if not path or self.labels_tree.exists(path):
                 continue
             self._labels_total += 1
-            self._labels_reviewed += 1
             changed = True
-            if hide:                                  # reviewed -> hidden by the filter
-                continue
             slot = b["slot"]
-            vals = (b["time"], "Session", self._SLOT_HUMAN.get(slot, slot), b["card"], "✓")
+            vals = (b["time"], "Session", self._SLOT_HUMAN.get(slot, slot), b["card"], "")
             self.labels_tree.insert("", 0, iid=path, values=vals)
             self._labels_path[path] = path
             self._labels_key[path] = self._key_from(path, slot)

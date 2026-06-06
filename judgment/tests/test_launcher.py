@@ -173,8 +173,8 @@ def test_labels_tab_live_bank_appends_labeled_row(tmp_path):
         app._live_seen = 0
         app._append_live_banks()
         rows = [app.labels_tree.item(i, "values") for i in app.labels_tree.get_children()]
-        assert rows == [("02:55:24", "Session", "Hole 1", "Ac", "✓")]   # banked = reviewed
-        assert app._labels_total == 1 and app._labels_reviewed == 1
+        assert rows == [("02:55:24", "Session", "Hole 1", "Ac", "")]   # labeled, NOT reviewed
+        assert app._labels_total == 1 and app._labels_reviewed == 0
         app._append_live_banks()                   # idempotent
         assert len(app.labels_tree.get_children()) == 1
     finally:

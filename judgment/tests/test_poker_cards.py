@@ -81,8 +81,8 @@ def test_training_writer_saves_dedups_persists(tmp_path):
     path = w.save(card, RANK_TO_INT["A"], SUIT_TO_INT["h"], "H0")
     assert path and path.endswith("_H0.png") and os.path.exists(path)   # returns the crop path
     (key, val), = json.load(open(tmp_path / "labels.json")).items()
-    # banked crops are human-confirmed -> reviewed
-    assert val == {"rank": "A", "suit": "hearts", "reviewed": True} and key.endswith("#H0")
+    # banked in play -> labeled but NOT reviewed (review is the Labels-tab second pass)
+    assert val == {"rank": "A", "suit": "hearts"} and key.endswith("#H0")
     saved_png = next(tmp_path.glob("*_H0.png"))
     assert cv2.imread(str(saved_png)).shape[:2] == (PC._STORE[1], PC._STORE[0])   # stored whole-card
     assert w.save(card, RANK_TO_INT["A"], SUIT_TO_INT["h"], "H0") is None         # dedup

@@ -250,10 +250,12 @@ class TrainingWriter:
         fid = f"live{self._pid}_{self._seq}"
         path = os.path.join(self.dir, f"{fid}_{slot}.png")
         cv2.imwrite(path, cv2.resize(card_bgr, _STORE))
-        # A banked crop came from a play confirm/correction — human-verified — so
-        # it's reviewed (the Labels tab shows ✓ and counts it).
+        # A crop banked in live play is NOT 'reviewed': confirming a hand mid-game is
+        # accepting a detection on the fly, not a deliberate label check. 'reviewed'
+        # is set only by the Labels-tab second pass (LabelLibrary.set_label/skip/
+        # set_reviewed), so the tab's worklist stays meaningful.
         self.labels[f"{fid}#{slot}"] = {"rank": INT_TO_RANK[rank_int],
-                                        "suit": _SUIT_NAME[suit_int], "reviewed": True}
+                                        "suit": _SUIT_NAME[suit_int]}
         self._sigs.append(sig)
         with open(self.labels_path, "w", encoding="utf-8") as f:
             json.dump(self.labels, f, indent=1)
