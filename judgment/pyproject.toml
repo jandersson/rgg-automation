@@ -13,6 +13,7 @@ dependencies = [
     "opencv-python>=4.8",
     "scikit-learn>=1.7.2",
     "torch>=2.12.0",
+    "torchvision>=0.23",
 ]
 
 # Managed with uv: `uv sync` to create .venv + install, `uv run pytest` to test.
@@ -34,6 +35,7 @@ explicit = true
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
 
 [tool.pytest.ini_options]
 # Lets `from judgment_assist...` resolve without an install. The brains import
