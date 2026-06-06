@@ -205,14 +205,25 @@ prices pot-odds against `pot_total` (the preflop-fold fix, 113383f).
 The overlay now shows the breakdown so this is legible: **`POT 325 (175+150)`** =
 plate 175 + this round's live bets 150.
 
-**Open diagnostic:** a session showed the overlay POT as bare **175** when it should
-have been ~325 (plate 175 + bets 150). That means `committed` came out 0 → the
-opponents' **Bet** plates read as `None`/0 for that frame, so the pot was
-undercounted and pot-odds ran too tight. With the breakdown line, a recurrence now
-shows as **`POT 175 (175+0)`** — if that appears, the `opp_bet` OCR (`read_opp_bets`
-→ `HudReader.read_roi(..., white=True)`) isn't reading the high-stakes Bet plates.
-Next step: capture a full-res frame on the high-stakes table where `(plate+0)`
-appears, run `table_state` on it, and inspect each `opp_bet` ROI read (alignment vs
-the bigger numbers, or the digit templates missing a glyph). Note Steam's F12
-captures the **game**, not the floating overlay — so to see what the overlay
-computed, read it off the breakdown line / Log pane, not from a screenshot.
+**Resolved (2026-06-06) — it was overlay self-occlusion, not the reader.** The
+`(plate+0)` symptom (bare `POT 175` when it should be ~325) came from the live
+**overlay window covering opponent seat 0's Bet plate**. Capture is a screen-*region*
+grab, so the floating overlay's own pixels are baked into the frame the reader then
+reads — at the default position `(40,40)` the overlay's POT/odds text sits right on
+`opp_bet[0]` (`[422,120,130,46]`), so that bet reads `None` and never enters
+`committed`. It's a feedback loop: the overlay corrupts its own input, and only when
+seat 0 is the bettor (seats 1/2 read fine).
+
+The "high-stakes bigger numbers" theory was a **red herring** — a 45-frame high-stakes
+capture (`data/poker_hs`) confirmed `read_roi(white=True)` reads 3-digit bets (150,
+250, 350, 400) at 0.88–0.92 confidence on seats 1 and 2; only seat 0 read `None`, on
+every frame, because the overlay was parked on it. Digit pitch on the Bet plate is
+~11px, so a 3-digit number fits the 130px ROI with room to spare.
+
+Fix: `overlay_blocked_rois` / `_overlay_occlusion_warning` in `app/live.py` detect
+when the overlay rect intersects any `opp_bet`/`pot`/`bet` ROI and surface
+**`⚠ overlay covers opp_bet[0] - drag it clear (pot undercount)`** in the overlay.
+Drag the box off the plates (down into the felt band between the board and the hole
+cards is clear) and the pot reads correctly. Note Steam's F12 captures the **game**
+at 960×540, not the overlay — use `judgment_assist.capture.dataset` for full-res
+1920×1080 frames that include the overlay exactly as the live reader sees it.
