@@ -173,7 +173,8 @@ def test_labels_tab_live_bank_appends_labeled_row(tmp_path):
         app._live_seen = 0
         app._append_live_banks()
         rows = [app.labels_tree.item(i, "values") for i in app.labels_tree.get_children()]
-        assert rows == [("02:55:24", "Session", "Hole 1", "Ac")]
+        assert rows == [("02:55:24", "Session", "Hole 1", "Ac", "✓")]   # banked = reviewed
+        assert app._labels_total == 1 and app._labels_reviewed == 1
         app._append_live_banks()                   # idempotent
         assert len(app.labels_tree.get_children()) == 1
     finally:
@@ -240,6 +241,7 @@ def test_labels_tab_fix_skip_delete(tmp_path):
     root, app = _gui()
     try:
         _temp_lib(app, tmp_path)
+        app._confirm_delete = lambda key: True               # auto-confirm the delete
         key, path = app._lib.add(_crop(), "cap1_1", "H0")    # captured, unlabeled
         app._reload_labels_list()
         assert app._labels_needs == 1                        # flagged as needing a label
@@ -247,14 +249,106 @@ def test_labels_tab_fix_skip_delete(tmp_path):
         app._edit_rank.set("A")
         app._edit_suit.set("h")
         app._save_label()
-        assert app._lib.labels[key] == {"rank": "A", "suit": "hearts"}
-        assert app._labels_needs == 0
+        assert app._lib.labels[key] == {"rank": "A", "suit": "hearts", "reviewed": True}
+        assert app._labels_needs == 0 and app._labels_reviewed == 1
         app.labels_tree.selection_set(path)
         app._skip_label()
-        assert app._lib.labels[key] == {"_skip": True}
+        assert app._lib.labels[key] == {"_skip": True, "reviewed": True}
         app.labels_tree.selection_set(path)
         app._delete_label()
         assert key not in app._lib.labels and not os.path.exists(path)
         assert app.labels_tree.get_children() == ()
+    finally:
+        root.destroy()
+
+
+def test_delete_cancelled_keeps_crop(tmp_path):
+    import os
+    import pytest
+    pytest.importorskip("cv2")
+    root, app = _gui()
+    try:
+        _temp_lib(app, tmp_path)
+        app._confirm_delete = lambda key: False              # user says No
+        key, path = app._lib.add(_crop(), "cap9_1", "H0", rank="A", suit="h")
+        app._reload_labels_list()
+        app.labels_tree.selection_set(path)
+        app._delete_label()
+        assert key in app._lib.labels and os.path.exists(path)   # untouched
+    finally:
+        root.destroy()
+
+
+def test_capture_prefills_detector_guess(tmp_path):
+    import pytest
+    pytest.importorskip("numpy")
+    pytest.importorskip("cv2")
+    from judgment_assist.cards import RANK_TO_INT, SUIT_TO_INT
+    frame, poker = _one_card_frame()
+
+    class _Reader:                                           # fake detector
+        def recognize(self, crop, kind="H"):
+            return (RANK_TO_INT["A"], SUIT_TO_INT["h"]), {"color": "red"}
+
+    root, app = _gui()
+    try:
+        _temp_lib(app, tmp_path)
+        app._sess = {"grab": None, "cfg": {"poker": poker},
+                     "grab_frame": lambda g, c: frame,
+                     "advisor": type("A", (), {"banked": [], "card_reader": _Reader()})()}
+        app._capture_from_game()
+        cap = next(k for k in app._lib.labels if k.startswith("cap"))
+        assert app._lib.labels[cap] == {"_guess": {"rank": "A", "suit": "hearts"}}
+        path = app._lib._path(cap)                            # selecting pre-fills pickers
+        app.labels_tree.selection_set(path)
+        app._show_label_crop()
+        assert app._edit_rank.get() == "A" and app._edit_suit.get() == "h"
+    finally:
+        app._sess = None
+        root.destroy()
+
+
+def test_reviewed_count_and_hide_filter(tmp_path):
+    import pytest
+    pytest.importorskip("cv2")
+    root, app = _gui()
+    try:
+        _temp_lib(app, tmp_path)
+        u, pu = app._lib.add(_crop(), "cap1_1", "H0")                    # unlabeled
+        app._lib.add(_crop(), "frame_x", "B0", rank="K", suit="s")       # labeled/reviewed
+        app._reload_labels_list()
+        assert (app._labels_total, app._labels_needs, app._labels_reviewed) == (2, 1, 1)
+        app.labels_tree.selection_set(pu)
+        app._edit_rank.set("A")
+        app._edit_suit.set("h")
+        app._save_label()
+        assert (app._labels_needs, app._labels_reviewed) == (0, 2)
+        app._hide_reviewed.set(True)
+        app._reload_labels_list()
+        assert app.labels_tree.get_children() == ()           # both reviewed -> hidden
+        assert app._labels_total == 2 and app._labels_reviewed == 2   # counts still full
+    finally:
+        root.destroy()
+
+
+def test_mark_reviewed_only_on_labeled(tmp_path):
+    import pytest
+    pytest.importorskip("cv2")
+    root, app = _gui()
+    try:
+        _temp_lib(app, tmp_path)
+        k, p = app._lib.add(_crop(), "frame_y", "B1", rank="Q", suit="d")
+        app._lib.labels[k].pop("reviewed")                    # start un-reviewed
+        app._lib._save()
+        app._reload_labels_list()
+        assert app._labels_reviewed == 0
+        app.labels_tree.selection_set(p)
+        app._mark_reviewed()
+        assert app._lib.labels[k].get("reviewed") is True
+        ku, pu = app._lib.add(_crop(), "cap2_1", "H0")        # unlabeled -> refused
+        app._reload_labels_list()
+        app.labels_tree.selection_set(pu)
+        app._mark_reviewed()
+        assert "reviewed" not in app._lib.labels[ku]
     finally:
         root.destroy()

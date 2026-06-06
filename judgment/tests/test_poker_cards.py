@@ -81,7 +81,8 @@ def test_training_writer_saves_dedups_persists(tmp_path):
     path = w.save(card, RANK_TO_INT["A"], SUIT_TO_INT["h"], "H0")
     assert path and path.endswith("_H0.png") and os.path.exists(path)   # returns the crop path
     (key, val), = json.load(open(tmp_path / "labels.json")).items()
-    assert val == {"rank": "A", "suit": "hearts"} and key.endswith("#H0")
+    # banked crops are human-confirmed -> reviewed
+    assert val == {"rank": "A", "suit": "hearts", "reviewed": True} and key.endswith("#H0")
     saved_png = next(tmp_path.glob("*_H0.png"))
     assert cv2.imread(str(saved_png)).shape[:2] == (PC._STORE[1], PC._STORE[0])   # stored whole-card
     assert w.save(card, RANK_TO_INT["A"], SUIT_TO_INT["h"], "H0") is None         # dedup
@@ -105,13 +106,24 @@ def test_label_library_add_fix_skip_delete(tmp_path):
     assert os.path.exists(path)
     e, = lib.entries()
     assert e["key"] == key and e["labeled"] is False and e["skip"] is False
+    assert e["reviewed"] is False
     lib.set_label(key, "A", "h")                          # letter suit -> full name
-    assert lib.labels[key] == {"rank": "A", "suit": "hearts"}
-    assert PC.LabelLibrary(str(tmp_path)).entries()[0]["labeled"] is True   # persisted
+    assert lib.labels[key] == {"rank": "A", "suit": "hearts", "reviewed": True}
+    e2 = PC.LabelLibrary(str(tmp_path)).entries()[0]      # persisted
+    assert e2["labeled"] is True and e2["reviewed"] is True
     lib.set_skip(key)
-    assert lib.entries()[0]["skip"] is True
+    assert lib.entries()[0]["skip"] is True and lib.labels[key]["reviewed"] is True
     lib.delete(key)
     assert lib.entries() == [] and not os.path.exists(path)   # crop gone too
+
+
+def test_label_library_guess_and_set_reviewed(tmp_path):
+    lib = PC.LabelLibrary(str(tmp_path))
+    key, _ = lib.add(_whole("A", red=True), "cap1_1", "H0", guess=("A", "h"))
+    e, = lib.entries()
+    assert e["labeled"] is False and e["guess"] == {"rank": "A", "suit": "hearts"}
+    lib.set_reviewed(key)                                  # mark correct without labeling
+    assert lib.entries()[0]["reviewed"] is True
 
 
 def test_label_library_is_dup(tmp_path):

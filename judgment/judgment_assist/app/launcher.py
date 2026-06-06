@@ -685,21 +685,26 @@ class LauncherApp:
 
         top = ttk.Frame(parent)
         top.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=6)
-        ttk.Label(top, text="Every crop the reader learns from. Click one to preview "
-                  "it, then fix / skip / delete the label below.",
+        ttk.Label(top, text="Every crop the reader learns from. ✓ = reviewed (a label "
+                  "you verified, or confirmed in play). Click one to preview, then "
+                  "fix / mark reviewed / skip / delete.",
                   foreground="#555", font=("Segoe UI", 9), wraplength=470
-                  ).grid(row=0, column=0, columnspan=4, sticky="w")
+                  ).grid(row=0, column=0, columnspan=5, sticky="w")
         ttk.Button(top, text="Refresh", command=self._reload_labels_list
                    ).grid(row=1, column=0, pady=4, sticky="w")
         ttk.Button(top, text="Open data folder", command=self._open_cards_dir
                    ).grid(row=1, column=1, padx=6)
+        self._hide_reviewed = tk.BooleanVar(value=False)
+        ttk.Checkbutton(top, text="Hide reviewed", variable=self._hide_reviewed,
+                        command=self._reload_labels_list).grid(row=1, column=2, padx=4)
         self._labels_count = ttk.Label(top, text="", foreground="#070")
-        self._labels_count.grid(row=1, column=2, padx=8, sticky="w")
+        self._labels_count.grid(row=1, column=3, padx=8, sticky="w")
 
-        cols = ("when", "source", "slot", "label")
+        cols = ("when", "source", "slot", "label", "ok")
         self.labels_tree = ttk.Treeview(parent, columns=cols, show="headings", height=11)
-        for c, w in (("when", 80), ("source", 80), ("slot", 80), ("label", 90)):
-            self.labels_tree.heading(c, text=c.capitalize())
+        for c, w, head in (("when", 78, "When"), ("source", 74, "Source"),
+                           ("slot", 74, "Slot"), ("label", 84, "Label"), ("ok", 34, "✓")):
+            self.labels_tree.heading(c, text=head)
             self.labels_tree.column(c, width=w, anchor="center")
         self.labels_tree.grid(row=1, column=0, sticky="nsew", padx=(8, 0))
         sb = ttk.Scrollbar(parent, orient="vertical", command=self.labels_tree.yview)
@@ -725,15 +730,17 @@ class LauncherApp:
                      state="readonly").grid(row=1, column=4, padx=2)
         ttk.Button(mid, text="Save label", command=self._save_label
                    ).grid(row=2, column=1, columnspan=2, sticky="ew", pady=3)
+        ttk.Button(mid, text="Mark reviewed ✓", command=self._mark_reviewed
+                   ).grid(row=2, column=3, columnspan=2, sticky="ew")
         ttk.Button(mid, text="Skip (exclude)", command=self._skip_label
-                   ).grid(row=2, column=3, padx=3)
+                   ).grid(row=3, column=1, columnspan=2, sticky="ew")
         ttk.Button(mid, text="Delete", command=self._delete_label
-                   ).grid(row=2, column=4)
+                   ).grid(row=3, column=3, columnspan=2, sticky="ew")
         self._refit_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(mid, text="Refit detector after edits (live session)",
-                        variable=self._refit_var).grid(row=3, column=1, columnspan=4, sticky="w")
+                        variable=self._refit_var).grid(row=4, column=1, columnspan=4, sticky="w")
         create = ttk.Frame(mid)
-        create.grid(row=4, column=1, columnspan=4, sticky="w", pady=(6, 0))
+        create.grid(row=5, column=1, columnspan=4, sticky="w", pady=(6, 0))
         ttk.Label(create, text="Add crops:", font=("Segoe UI", 9)).grid(row=0, column=0)
         ttk.Button(create, text="Capture from game", command=self._capture_from_game
                    ).grid(row=0, column=1, padx=4)
@@ -745,9 +752,10 @@ class LauncherApp:
         self._labels_img = None          # hold the PhotoImage ref against GC
         self._labels_path = {}           # tree iid (= crop path) -> crop path
         self._labels_key = {}            # tree iid -> labels.json key (frame#slot)
-        self._labels_needs = 0
+        self._labels_total = self._labels_needs = self._labels_reviewed = 0
         self._live_seen = 0
         self._cap_pid, self._cap_seq = os.getpid(), 0    # ids for captured crops
+        self._suggest_reader, self._suggest_dirty = None, True   # lazy guess reader
         self._reload_labels_list()
 
     @staticmethod
@@ -764,7 +772,8 @@ class LauncherApp:
         if e["skip"]:
             return "— skip —"
         if not e["labeled"]:
-            return "(unlabeled)"
+            g = e.get("guess")
+            return f"? {g['rank']}{self._SUIT_SYM.get(g['suit'], '?')}" if g else "(unlabeled)"
         return f"{e['rank']}{self._SUIT_SYM.get(e['suit'], '?')}"
 
     @staticmethod
@@ -782,24 +791,32 @@ class LauncherApp:
             return
         when = datetime.datetime.fromtimestamp(e["mtime"]).strftime("%H:%M:%S")
         vals = (when, self._source_of(e["frame"]),
-                self._SLOT_HUMAN.get(e["slot"], e["slot"]), self._label_text(e))
+                self._SLOT_HUMAN.get(e["slot"], e["slot"]), self._label_text(e),
+                "✓" if e["reviewed"] else "")
         self.labels_tree.insert("", 0 if top else "end", iid=path, values=vals)
         self._labels_path[path] = path
         self._labels_key[path] = e["key"]
 
     def _reload_labels_list(self, select=None):
-        """Rebuild the list from disk (newest first). Cheap enough for a button /
+        """Rebuild the list from disk (newest first). Counts cover the WHOLE library;
+        'Hide reviewed' only filters what's shown. Cheap enough for a button /
         post-edit; not run per-frame."""
         self._lib.reload()
+        self._suggest_dirty = True                    # library changed -> rebuild guesser
         for it in self.labels_tree.get_children():
             self.labels_tree.delete(it)
         self._labels_path.clear()
         self._labels_key.clear()
-        self._labels_needs = 0
+        self._labels_total = self._labels_needs = self._labels_reviewed = 0
+        hide = self._hide_reviewed.get()
         for e in self._lib.entries():                 # newest first
-            self._labels_row(e, top=False)
+            self._labels_total += 1
             if not e["labeled"] and not e["skip"]:
                 self._labels_needs += 1
+            if e["reviewed"]:
+                self._labels_reviewed += 1
+            if not (hide and e["reviewed"]):
+                self._labels_row(e, top=False)
         # current session's banks are now in the list; don't let _append re-add them
         self._live_seen = len(self._sess["advisor"].banked) if self._sess else 0
         self._update_labels_count()
@@ -808,28 +825,37 @@ class LauncherApp:
             self.labels_tree.see(select)
 
     def _append_live_banks(self):
-        """Per-tick: add the running advisor's freshly-banked (already-labeled) crops
-        at the top, without a full disk rescan."""
+        """Per-tick: add the running advisor's freshly-banked crops at the top
+        (already reviewed — they came from a play confirm), without a disk rescan."""
         s = self._sess
         if not s:
             return
         banked = s["advisor"].banked
+        hide = self._hide_reviewed.get()
+        changed = False
         while self._live_seen < len(banked):
             b = banked[self._live_seen]
             self._live_seen += 1
             path = b.get("path")
             if not path or self.labels_tree.exists(path):
                 continue
+            self._labels_total += 1
+            self._labels_reviewed += 1
+            changed = True
+            if hide:                                  # reviewed -> hidden by the filter
+                continue
             slot = b["slot"]
-            vals = (b["time"], "Session", self._SLOT_HUMAN.get(slot, slot), b["card"])
+            vals = (b["time"], "Session", self._SLOT_HUMAN.get(slot, slot), b["card"], "✓")
             self.labels_tree.insert("", 0, iid=path, values=vals)
             self._labels_path[path] = path
             self._labels_key[path] = self._key_from(path, slot)
-        self._update_labels_count()
+        if changed:
+            self._update_labels_count()
 
     def _update_labels_count(self):
-        n = len(self.labels_tree.get_children())
-        self._labels_count.configure(text=f"{n} crops · {self._labels_needs} need a label")
+        self._labels_count.configure(
+            text=f"{self._labels_total} crops · {self._labels_needs} need a label · "
+                 f"{self._labels_reviewed} reviewed")
 
     def _show_label_crop(self):
         sel = self.labels_tree.selection()
@@ -848,11 +874,18 @@ class LauncherApp:
         else:
             self._labels_img = None
             self._labels_preview.configure(image="", text="(crop not on disk)")
-        # seed the pickers with the crop's current label so a fix is one change
+        # seed the pickers: from the real label if there is one, else the detector's
+        # guess (stored at capture/import time) so an unlabeled crop is one click.
         key = self._labels_key.get(iid)
         lab = self._lib.labels.get(key, {}) if key else {}
-        self._edit_rank.set(lab.get("rank", ""))
-        self._edit_suit.set(self._SUIT_LETTER.get(lab.get("suit", ""), ""))
+        src = lab if "rank" in lab else (lab.get("_guess") or {})
+        self._edit_rank.set(src.get("rank", ""))
+        self._edit_suit.set(self._SUIT_LETTER.get(src.get("suit", ""), ""))
+        if "rank" not in lab and lab.get("_guess"):
+            g = lab["_guess"]
+            self._labels_status(
+                f"detector guess {g['rank']}{self._SUIT_SYM.get(g['suit'], '?')}"
+                " — verify and Save")
 
     def _selected_key(self):
         sel = self.labels_tree.selection()
@@ -861,22 +894,25 @@ class LauncherApp:
             return None, None
         return sel[0], self._labels_key.get(sel[0])
 
-    def _sync_after_edit(self):
-        """Keep the live session consistent with a disk edit: resync the writer (so a
-        deleted crop isn't resurrected on the next bank) and, if asked, refit the
-        detector so the change takes effect immediately."""
+    def _sync_writer(self):
+        """Refresh the live writer's in-memory labels from disk after a tab edit, so
+        its next bank (which rewrites the whole file) can't clobber the edit or
+        resurrect a deleted entry (the POKER.md gotcha)."""
         s = self._sess
-        if not s:
-            return
-        adv = s["advisor"]
-        if getattr(adv, "training", None) is not None:
+        if s and getattr(s["advisor"], "training", None) is not None:
             try:
-                adv.training.reload()
+                s["advisor"].training.reload()
             except Exception:                         # noqa: BLE001
                 pass
-        if self._refit_var.get() and getattr(adv, "card_reader", None) is not None:
+
+    def _sync_after_edit(self):
+        """As :meth:`_sync_writer`, plus refit the detector (if asked) so a changed
+        label takes effect immediately. Used by edits that alter training data."""
+        self._sync_writer()
+        s = self._sess
+        if s and self._refit_var.get() and getattr(s["advisor"], "card_reader", None):
             try:
-                adv.card_reader.reload()
+                s["advisor"].card_reader.reload()
             except Exception as ex:                    # noqa: BLE001
                 self._labels_status(f"refit failed: {ex}", err=True)
 
@@ -894,6 +930,22 @@ class LauncherApp:
         self._reload_labels_list(select=iid)
         self._labels_status(f"labelled {self._SLOT_HUMAN.get(key.split('#')[1])} = {r}{su}")
 
+    def _mark_reviewed(self):
+        """Mark the selected (already-labeled) crop reviewed — 'this label is right' —
+        without changing it. Metadata only, so no detector refit; but the writer is
+        resynced so the flag survives the next bank's full-file rewrite."""
+        iid, key = self._selected_key()
+        if not key:
+            return
+        self._lib.reload()
+        if "rank" not in self._lib.labels.get(key, {}):
+            self._labels_status("label it first, then mark it reviewed", err=True)
+            return
+        self._lib.set_reviewed(key)
+        self._sync_writer()
+        self._reload_labels_list(select=iid)
+        self._labels_status(f"marked {self._SLOT_HUMAN.get(key.split('#')[1])} reviewed ✓")
+
     def _skip_label(self):
         iid, key = self._selected_key()
         if not key:
@@ -904,9 +956,19 @@ class LauncherApp:
         self._reload_labels_list(select=iid)
         self._labels_status(f"marked {key.split('#')[1]} as skip (excluded from training)")
 
+    def _confirm_delete(self, key):
+        """Yes/no guard for a destructive delete. Separated so tests can stub it."""
+        from tkinter import messagebox
+        return messagebox.askyesno(
+            "Delete crop", f"Permanently delete {self._SLOT_HUMAN.get(key.split('#')[1])}"
+            "'s crop and label?\nThe PNG is removed from disk.", parent=self.root)
+
     def _delete_label(self):
         iid, key = self._selected_key()
         if not key:
+            return
+        if not self._confirm_delete(key):
+            self._labels_status("delete cancelled")
             return
         self._lib.reload()
         self._lib.delete(key)
@@ -955,9 +1017,39 @@ class LauncherApp:
             return None, "no 'poker' ROIs in the config (calibrate first)"
         return (frame, cfg["poker"]), None
 
+    def _reader_for_suggest(self):
+        """A card reader to pre-fill labels for new crops: the running session's, or
+        a one-off built from the library (cached; rebuilt after edits). None if there
+        aren't enough labeled exemplars yet."""
+        s = self._sess
+        if s and getattr(s["advisor"], "card_reader", None) is not None:
+            return s["advisor"].card_reader
+        if self._suggest_dirty:
+            self._suggest_dirty = False
+            try:
+                from ..vision.poker_cards import HoleCardReader
+                self._suggest_reader = HoleCardReader(self._lib.dir)
+            except Exception:                         # noqa: BLE001 - too few exemplars
+                self._suggest_reader = None
+        return self._suggest_reader
+
+    def _guess_for(self, crop, slot):
+        """The detector's (rank, suit) guess for a NATIVE crop, or None. Computed at
+        capture/import time (native crop -> reliable colour), stored as the pre-fill."""
+        reader = self._reader_for_suggest()
+        if reader is None:
+            return None
+        try:
+            from ..cards import INT_TO_RANK, INT_TO_SUIT
+            (ri, si), _ = reader.recognize(crop, kind=slot[0])
+            return INT_TO_RANK[ri], INT_TO_SUIT[si]
+        except Exception:                             # noqa: BLE001
+            return None
+
     def _capture_from_game(self):
         """Grab the face-up cards on screen now and add each as a NEW unlabeled crop
-        (deduped against the library), ready to label in the list."""
+        (deduped against the library), pre-filled with the detector's guess and ready
+        to verify in the list."""
         from ..vision.poker_cards import whole_card_crops
         got, err = self._grab_poker_frame()
         if err:
@@ -969,7 +1061,8 @@ class LauncherApp:
             if self._lib.is_dup(crop):
                 continue
             self._cap_seq += 1
-            self._lib.add(crop, f"cap{self._cap_pid}_{self._cap_seq}", slot)
+            self._lib.add(crop, f"cap{self._cap_pid}_{self._cap_seq}", slot,
+                          guess=self._guess_for(crop, slot))
             n += 1
         self._reload_labels_list()
         self._labels_status(
@@ -1011,7 +1104,7 @@ class LauncherApp:
             for slot, crop in whole_card_crops(im, poker):
                 if self._lib.is_dup(crop):
                     continue
-                self._lib.add(crop, f"imp_{stem}", slot)
+                self._lib.add(crop, f"imp_{stem}", slot, guess=self._guess_for(crop, slot))
                 n += 1
         self._reload_labels_list()
         self._labels_status(

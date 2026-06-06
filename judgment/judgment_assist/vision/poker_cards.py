@@ -250,8 +250,10 @@ class TrainingWriter:
         fid = f"live{self._pid}_{self._seq}"
         path = os.path.join(self.dir, f"{fid}_{slot}.png")
         cv2.imwrite(path, cv2.resize(card_bgr, _STORE))
+        # A banked crop came from a play confirm/correction — human-verified — so
+        # it's reviewed (the Labels tab shows ✓ and counts it).
         self.labels[f"{fid}#{slot}"] = {"rank": INT_TO_RANK[rank_int],
-                                        "suit": _SUIT_NAME[suit_int]}
+                                        "suit": _SUIT_NAME[suit_int], "reviewed": True}
         self._sigs.append(sig)
         with open(self.labels_path, "w", encoding="utf-8") as f:
             json.dump(self.labels, f, indent=1)
@@ -292,7 +294,9 @@ class LabelLibrary:
 
     def entries(self):
         """Every label entry that still has a crop on disk, newest first by mtime.
-        Each: ``{key, frame, slot, path, rank, suit, skip, labeled, mtime}``."""
+        Each: ``{key, frame, slot, path, rank, suit, skip, labeled, reviewed, guess,
+        mtime}``. ``reviewed`` marks a human-verified label (set on a tab edit or a
+        play confirm); ``guess`` is the detector's pre-fill for an unlabeled crop."""
         out = []
         for key, lab in self.labels.items():
             path = self._path(key)
@@ -302,17 +306,32 @@ class LabelLibrary:
             out.append({"key": key, "frame": frame, "slot": slot, "path": path,
                         "rank": lab.get("rank"), "suit": lab.get("suit"),
                         "skip": bool(lab.get("_skip")), "labeled": "rank" in lab,
+                        "reviewed": bool(lab.get("reviewed")), "guess": lab.get("_guess"),
                         "mtime": os.path.getmtime(path)})
         return sorted(out, key=lambda e: e["mtime"], reverse=True)
 
     def set_label(self, key, rank, suit):
-        """Fix/assign a crop's rank + suit (suit as 'c'/'d'/'h'/'s' or full name)."""
-        self.labels[key] = {"rank": rank, "suit": _SUIT_FULL.get(suit, suit)}
+        """Fix/assign a crop's rank + suit (suit as 'c'/'d'/'h'/'s' or full name).
+        A hand-set label is verified, so it's marked reviewed."""
+        self.labels[key] = {"rank": rank, "suit": _SUIT_FULL.get(suit, suit),
+                            "reviewed": True}
         self._save()
 
     def set_skip(self, key):
-        """Mark a crop ``_skip`` — kept on disk but excluded from training."""
-        self.labels[key] = {"_skip": True}
+        """Mark a crop ``_skip`` — kept on disk but excluded from training (a review
+        decision, so reviewed too)."""
+        self.labels[key] = {"_skip": True, "reviewed": True}
+        self._save()
+
+    def set_reviewed(self, key, value=True):
+        """Mark a crop reviewed without changing its label — 'this one is correct'."""
+        lab = self.labels.get(key)
+        if lab is None:
+            return
+        if value:
+            lab["reviewed"] = True
+        else:
+            lab.pop("reviewed", None)
         self._save()
 
     def delete(self, key):
@@ -323,13 +342,21 @@ class LabelLibrary:
         if os.path.exists(path):
             os.remove(path)
 
-    def add(self, crop_bgr, frame_id, slot, rank=None, suit=None):
-        """Write a new whole-card crop (captured/imported) and its label entry —
-        ``{}`` when rank is omitted (to be labeled in the tab). Returns (key, path)."""
+    def add(self, crop_bgr, frame_id, slot, rank=None, suit=None, guess=None):
+        """Write a new whole-card crop (captured/imported) and its label entry. With
+        ``rank`` it's a finished (reviewed) label; otherwise it's unlabeled — ``{}``,
+        or ``{"_guess": {...}}`` when the detector offered a pre-fill (``guess`` is a
+        ``(rank, suit)`` pair). Returns (key, path)."""
         key, path = f"{frame_id}#{slot}", os.path.join(self.dir, f"{frame_id}_{slot}.png")
         cv2.imwrite(path, cv2.resize(crop_bgr, _STORE))
-        self.labels[key] = ({"rank": rank, "suit": _SUIT_FULL.get(suit, suit)} if rank
-                            else {})
+        if rank:
+            self.labels[key] = {"rank": rank, "suit": _SUIT_FULL.get(suit, suit),
+                                "reviewed": True}
+        elif guess:
+            gr, gs = guess
+            self.labels[key] = {"_guess": {"rank": gr, "suit": _SUIT_FULL.get(gs, gs)}}
+        else:
+            self.labels[key] = {}
         self._save()
         return key, path
 
