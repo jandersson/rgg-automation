@@ -100,66 +100,109 @@ def test_common_flags_always_present():
         assert argv[argv.index(flag) + 1] == val
 
 
+_BASE_ROOT = None
+
+
 def _gui():
-    """Build a LauncherApp on a hidden root, or skip if there's no display."""
+    """Build a LauncherApp on a hidden Toplevel, or skip if there's no display.
+    Reuses ONE base Tk() across tests — repeatedly creating/destroying Tk roots in a
+    process is flaky (intermittent 'no display'); a single root + per-test Toplevel
+    is the supported pattern."""
+    global _BASE_ROOT
     import pytest
     tk = pytest.importorskip("tkinter")
     from judgment_assist.app.launcher import LauncherApp
-    try:
-        root = tk.Tk()
-    except tk.TclError:
-        pytest.skip("no display for tkinter")
-    root.withdraw()
-    return root, LauncherApp(root)
+    if _BASE_ROOT is None:
+        try:
+            _BASE_ROOT = tk.Tk()
+        except tk.TclError:
+            pytest.skip("no display for tkinter")
+        _BASE_ROOT.withdraw()
+    top = tk.Toplevel(_BASE_ROOT)
+    top.withdraw()
+    return top, LauncherApp(top)
 
 
-def test_launcher_has_play_and_review_tabs():
+def _crop():
+    np = __import__("numpy")
+    return np.full((400, 278, 3), 200, "uint8")
+
+
+def _temp_lib(app, tmp):
+    """Point the Labels tab at an isolated library so edit tests don't touch real data."""
+    from judgment_assist.vision.poker_cards import LabelLibrary
+    app._lib = LabelLibrary(str(tmp))
+    app._reload_labels_list()
+
+
+def test_launcher_has_play_and_labels_tabs():
     root, app = _gui()
     try:
-        assert [app.nb.tab(t, "text") for t in app.nb.tabs()] == ["Play", "Review"]
+        assert [app.nb.tab(t, "text") for t in app.nb.tabs()] == ["Play", "Labels"]
     finally:
         root.destroy()
 
 
-def test_review_tab_lists_live_banked_cards_newest_first():
+def test_labels_tab_loads_whole_library_from_disk():
+    """The tab lists every crop the reader learns from (seeds + sessions), not just
+    the running session — that's the point of backing it with LabelLibrary."""
+    import json
+    from judgment_assist.app.launcher import ROOT
+    lp = ROOT / "data" / "poker_cards" / "labels.json"
+    if not lp.exists() or not json.load(open(lp, encoding="utf-8")):
+        import pytest
+        pytest.skip("no label library on disk to load")
     root, app = _gui()
     try:
-        app._clear_review()                        # drop any on-disk history -> isolate
-        class _Adv:                                # stands in for a running advisor
-            banked = [{"time": "02:55:24", "slot": "H0", "card": "Ac", "path": None},
-                      {"time": "02:55:25", "slot": "H1", "card": "Ts", "path": None}]
+        assert len(app.labels_tree.get_children()) > 0     # loaded at build time
+    finally:
+        root.destroy()
+
+
+def test_labels_tab_live_bank_appends_labeled_row(tmp_path):
+    import pytest
+    pytest.importorskip("cv2")
+    root, app = _gui()
+    try:
+        _temp_lib(app, tmp_path)                   # empty isolated library
+        assert app.labels_tree.get_children() == ()
+        class _Adv:
+            banked = [{"time": "02:55:24", "slot": "H0", "card": "Ac",
+                       "path": str(tmp_path / "live9_1_H0.png")}]
         app._sess = {"advisor": _Adv()}
-        app._review_seen = 0
-        app._refresh_review()
-        rows = [app.review_tree.item(i, "values") for i in app.review_tree.get_children()]
-        assert rows == [("Today 02:55", "02:55:25", "Hole 2", "Ts"),
-                        ("Today 02:55", "02:55:24", "Hole 1", "Ac")]   # newest on top
-        assert app._review_count.cget("text") == "2 banked"
-        app._refresh_review()                      # idempotent: no duplicate rows
-        assert len(app.review_tree.get_children()) == 2
-        app._clear_review()                        # clears the list only
-        assert app.review_tree.get_children() == ()
+        app._live_seen = 0
+        app._append_live_banks()
+        rows = [app.labels_tree.item(i, "values") for i in app.labels_tree.get_children()]
+        assert rows == [("02:55:24", "Session", "Hole 1", "Ac")]
+        app._append_live_banks()                   # idempotent
+        assert len(app.labels_tree.get_children()) == 1
     finally:
         app._sess = None
         root.destroy()
 
 
-def test_review_tab_loads_past_sessions_from_disk():
-    """The tab pre-loads every past session's banked crops from data/poker_cards,
-    not just the running session — that's the whole point of disk-backing it."""
-    import json
-    from judgment_assist.app.launcher import ROOT
-    lp = ROOT / "data" / "poker_cards" / "labels.json"
-    if not lp.exists() or not any(
-            k.startswith("live") for k in json.load(open(lp, encoding="utf-8"))):
-        import pytest
-        pytest.skip("no banked 'live*' history on disk to load")
+def test_labels_tab_fix_skip_delete(tmp_path):
+    import os
+    import pytest
+    pytest.importorskip("cv2")
     root, app = _gui()
     try:
-        assert len(app.review_tree.get_children()) > 0     # loaded at build time
-        app._clear_review()
-        assert app.review_tree.get_children() == ()
-        app._load_review_history()                          # Refresh reloads them
-        assert len(app.review_tree.get_children()) > 0
+        _temp_lib(app, tmp_path)
+        key, path = app._lib.add(_crop(), "cap1_1", "H0")    # captured, unlabeled
+        app._reload_labels_list()
+        assert app._labels_needs == 1                        # flagged as needing a label
+        app.labels_tree.selection_set(path)
+        app._edit_rank.set("A")
+        app._edit_suit.set("h")
+        app._save_label()
+        assert app._lib.labels[key] == {"rank": "A", "suit": "hearts"}
+        assert app._labels_needs == 0
+        app.labels_tree.selection_set(path)
+        app._skip_label()
+        assert app._lib.labels[key] == {"_skip": True}
+        app.labels_tree.selection_set(path)
+        app._delete_label()
+        assert key not in app._lib.labels and not os.path.exists(path)
+        assert app.labels_tree.get_children() == ()
     finally:
         root.destroy()

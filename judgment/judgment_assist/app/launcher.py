@@ -161,9 +161,9 @@ class LauncherApp:
         self.nb = ttk.Notebook(root)
         self.nb.grid(row=0, column=0, sticky="nsew")
         self.tab_play = ttk.Frame(self.nb)
-        self.tab_review = ttk.Frame(self.nb)
+        self.tab_labels = ttk.Frame(self.nb)
         self.nb.add(self.tab_play, text="Play")
-        self.nb.add(self.tab_review, text="Review")
+        self.nb.add(self.tab_labels, text="Labels")
 
         self.v = {
             "game": tk.StringVar(value=DEFAULTS["game"]),
@@ -287,7 +287,7 @@ class LauncherApp:
         self.log.pack(fill="both", expand=True, padx=4, pady=4)
         self._orig_stdout = None
 
-        self._build_review(self.tab_review)
+        self._build_labels(self.tab_labels)
 
         self.v["game"].trace_add("write", lambda *_: self._toggle())
         self.corr_mode.trace_add("write", lambda *_: self._show_corr_mode())
@@ -453,7 +453,7 @@ class LauncherApp:
                 pass
         advisor = PokerAdvisor(reader, roi, opp_fallback=o["opp"], iters=o["iters"],
                                card_reader=card_reader, training=training)
-        self._review_seen = 0          # read this fresh advisor's bank log from the top
+        self._live_seen = 0            # read this fresh advisor's bank log from the top
         grab = ScreenGrabber(monitor=cfg.get("monitor", 1))
         grab.__enter__()
         overlay = SuggestionOverlay(master=self.root, input_enabled=False,
@@ -506,7 +506,7 @@ class LauncherApp:
             s["last"] = text
         s["overlay"].update_text(text)
         self._refresh_corrections()
-        self._refresh_review()
+        self._append_live_banks()
         self.root.after(s["interval"], self._tick)
 
     def _stop_session(self):
@@ -663,156 +663,253 @@ class LauncherApp:
             txt = (INT_TO_RANK[card[0]] + INT_TO_SUIT[card[1]]) if present else "-"
             self._slotbtns[i].configure(text=f"{lab}:{txt}")
 
-    # -------------------------------------------------------- Review tab -------
+    # -------------------------------------------------------- Labels tab -------
     _SLOT_HUMAN = {"H0": "Hole 1", "H1": "Hole 2", "B0": "Board 1", "B1": "Board 2",
                    "B2": "Board 3", "B3": "Board 4", "B4": "Board 5"}
+    _SUIT_SYM = {"clubs": "♣", "diamonds": "♦", "hearts": "♥",
+                 "spades": "♠"}
+    _SUIT_LETTER = {"clubs": "c", "diamonds": "d", "hearts": "h", "spades": "s"}
 
-    def _build_review(self, parent):
-        """The Review tab: every card banked to data/poker_cards across ALL sessions
-        (not just the running one), newest first, grouped by session, with a
-        click-to-preview of the actual crop that was learned — so you can spot a
-        wrong label that got saved. List only; the crops/labels live on disk."""
+    def _build_labels(self, parent):
+        """The Labels tab: review and edit the whole training library (data/
+        poker_cards) — every crop the reader learns from, across seeds, played
+        sessions, captures and imports. Click a row to preview the crop; fix its
+        rank/suit, mark it skip, or delete it. Edits hit labels.json at once and (if
+        a session is running) refit the live detector. Create paths are wired in
+        separately."""
         tk, ttk = self.tk, self.ttk
+        from ..vision.poker_cards import LabelLibrary
+        self._lib = LabelLibrary(str(ROOT / "data" / "poker_cards"))
         parent.columnconfigure(0, weight=1)
         parent.rowconfigure(1, weight=1)
+
         top = ttk.Frame(parent)
         top.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=6)
-        ttk.Label(top, text="Cards banked across all sessions (newest first). Click a "
-                  "row to preview the learned crop and check its label.",
-                  foreground="#555", font=("Segoe UI", 9), wraplength=460
+        ttk.Label(top, text="Every crop the reader learns from. Click one to preview "
+                  "it, then fix / skip / delete the label below.",
+                  foreground="#555", font=("Segoe UI", 9), wraplength=470
                   ).grid(row=0, column=0, columnspan=4, sticky="w")
-        ttk.Button(top, text="Refresh", command=self._load_review_history
+        ttk.Button(top, text="Refresh", command=self._reload_labels_list
                    ).grid(row=1, column=0, pady=4, sticky="w")
         ttk.Button(top, text="Open data folder", command=self._open_cards_dir
                    ).grid(row=1, column=1, padx=6)
-        ttk.Button(top, text="Clear list", command=self._clear_review
-                   ).grid(row=1, column=2)
-        self._review_count = ttk.Label(top, text="0 banked", foreground="#070")
-        self._review_count.grid(row=1, column=3, padx=8)
+        self._labels_count = ttk.Label(top, text="", foreground="#070")
+        self._labels_count.grid(row=1, column=2, padx=8, sticky="w")
 
-        cols = ("session", "when", "slot", "card")
-        self.review_tree = ttk.Treeview(parent, columns=cols, show="headings", height=12)
-        for c, w in (("session", 110), ("when", 80), ("slot", 90), ("card", 70)):
-            self.review_tree.heading(c, text=c.capitalize())
-            self.review_tree.column(c, width=w, anchor="center")
-        self.review_tree.grid(row=1, column=0, sticky="nsew", padx=(8, 0))
-        sb = ttk.Scrollbar(parent, orient="vertical", command=self.review_tree.yview)
+        cols = ("when", "source", "slot", "label")
+        self.labels_tree = ttk.Treeview(parent, columns=cols, show="headings", height=11)
+        for c, w in (("when", 80), ("source", 80), ("slot", 80), ("label", 90)):
+            self.labels_tree.heading(c, text=c.capitalize())
+            self.labels_tree.column(c, width=w, anchor="center")
+        self.labels_tree.grid(row=1, column=0, sticky="nsew", padx=(8, 0))
+        sb = ttk.Scrollbar(parent, orient="vertical", command=self.labels_tree.yview)
         sb.grid(row=1, column=1, sticky="ns")
-        self.review_tree.configure(yscrollcommand=sb.set)
-        self.review_tree.bind("<<TreeviewSelect>>", lambda e: self._show_review_crop())
+        self.labels_tree.configure(yscrollcommand=sb.set)
+        self.labels_tree.bind("<<TreeviewSelect>>", lambda e: self._show_label_crop())
 
-        self._review_preview = ttk.Label(
-            parent, text="(select a row to preview the learned crop)",
-            foreground="#888", compound="top")
-        self._review_preview.grid(row=2, column=0, columnspan=2, pady=8)
-        self._review_img = None          # keep a ref so tk doesn't GC the PhotoImage
-        self._review_seen = 0            # how many of advisor.banked we've shown live
-        self._review_paths = {}          # tree item id (= crop path) -> crop path
-        self._review_sessions = {}       # session pid -> human label, cached
-        self._load_review_history()
+        mid = ttk.Frame(parent)
+        mid.grid(row=2, column=0, columnspan=2, sticky="ew", pady=4)
+        self._labels_preview = ttk.Label(mid, text="(select a crop to preview)",
+                                          foreground="#888", compound="top")
+        self._labels_preview.grid(row=0, column=0, rowspan=4, padx=(8, 14))
+        # edit panel
+        ttk.Label(mid, text="Edit selected crop:", font=("Segoe UI", 9, "bold")
+                  ).grid(row=0, column=1, columnspan=4, sticky="w")
+        self._edit_rank = tk.StringVar()
+        self._edit_suit = tk.StringVar()
+        ttk.Label(mid, text="rank").grid(row=1, column=1, sticky="e")
+        ttk.Combobox(mid, values=self._RANKS, textvariable=self._edit_rank, width=4,
+                     state="readonly").grid(row=1, column=2, padx=2)
+        ttk.Label(mid, text="suit").grid(row=1, column=3, sticky="e")
+        ttk.Combobox(mid, values=self._SUITS, textvariable=self._edit_suit, width=4,
+                     state="readonly").grid(row=1, column=4, padx=2)
+        ttk.Button(mid, text="Save label", command=self._save_label
+                   ).grid(row=2, column=1, columnspan=2, sticky="ew", pady=3)
+        ttk.Button(mid, text="Skip (exclude)", command=self._skip_label
+                   ).grid(row=2, column=3, padx=3)
+        ttk.Button(mid, text="Delete", command=self._delete_label
+                   ).grid(row=2, column=4)
+        self._refit_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(mid, text="Refit detector after edits (live session)",
+                        variable=self._refit_var).grid(row=3, column=1, columnspan=4, sticky="w")
+        self._labels_msg = ttk.Label(parent, text="", foreground="#070")
+        self._labels_msg.grid(row=3, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 6))
 
-    def _session_label(self, ts):
-        """Human session tag from a bank time: 'Today HH:MM', 'Yday HH:MM', or
-        'Mon DD HH:MM'. Rows of one session share it, so the column groups them."""
+        self._labels_img = None          # hold the PhotoImage ref against GC
+        self._labels_path = {}           # tree iid (= crop path) -> crop path
+        self._labels_key = {}            # tree iid -> labels.json key (frame#slot)
+        self._labels_needs = 0
+        self._live_seen = 0
+        self._reload_labels_list()
+
+    @staticmethod
+    def _source_of(frame):
+        if frame.startswith("frame"):
+            return "Seed"
+        if frame.startswith("live"):
+            return "Session"
+        if frame.startswith("cap"):
+            return "Capture"
+        return "Import"
+
+    def _label_text(self, e):
+        if e["skip"]:
+            return "— skip —"
+        if not e["labeled"]:
+            return "(unlabeled)"
+        return f"{e['rank']}{self._SUIT_SYM.get(e['suit'], '?')}"
+
+    @staticmethod
+    def _key_from(path, slot):
+        base = os.path.basename(path)
+        suf = f"_{slot}.png"
+        frame = base[:-len(suf)] if base.endswith(suf) else os.path.splitext(base)[0]
+        return f"{frame}#{slot}"
+
+    def _labels_row(self, e, top=False):
+        """Insert one library entry as a row (iid = crop path, deduped)."""
         import datetime
-        d = datetime.datetime.fromtimestamp(ts)
-        today = datetime.date.today()
-        if d.date() == today:
-            return f"Today {d:%H:%M}"
-        if d.date() == today - datetime.timedelta(days=1):
-            return f"Yday {d:%H:%M}"
-        return d.strftime("%b %d %H:%M")
-
-    def _add_review_row(self, session, when, slot, card, path, top=True):
-        """Insert one banked-card row, deduped by crop path (so a card already shown
-        live isn't re-added by a disk Refresh). ``top`` puts it at the head."""
-        if path and self.review_tree.exists(path):
+        path = e["path"]
+        if path and self.labels_tree.exists(path):
             return
-        sloth = self._SLOT_HUMAN.get(slot, slot)
-        idx = 0 if top else "end"
-        vals = (session, when, sloth, card)
-        item = (self.review_tree.insert("", idx, iid=path, values=vals) if path
-                else self.review_tree.insert("", idx, values=vals))
-        self._review_paths[item] = path
+        when = datetime.datetime.fromtimestamp(e["mtime"]).strftime("%H:%M:%S")
+        vals = (when, self._source_of(e["frame"]),
+                self._SLOT_HUMAN.get(e["slot"], e["slot"]), self._label_text(e))
+        self.labels_tree.insert("", 0 if top else "end", iid=path, values=vals)
+        self._labels_path[path] = path
+        self._labels_key[path] = e["key"]
 
-    def _load_review_history(self):
-        """(Re)load every past session's banked crops from data/poker_cards into the
-        tab. Only the play-banked 'live*' crops (sessions) — the 'frame_*' seeds are
-        the original hand-labeled library, not a session. Time comes from the PNG
-        mtime (labels.json has no timestamp). Idempotent: existing rows are skipped."""
-        import datetime
-        import json
-        card_dir = ROOT / "data" / "poker_cards"
-        labels_path = card_dir / "labels.json"
-        if not labels_path.exists():
-            return
-        try:
-            labels = json.load(open(labels_path, encoding="utf-8"))
-        except Exception:                             # noqa: BLE001 - corrupt/locked
-            return
-        suit = {"clubs": "c", "diamonds": "d", "hearts": "h", "spades": "s"}
-        rows = []                                     # (mtime, path, pid, slot, card)
-        for key, lab in labels.items():
-            if lab.get("_skip") or "rank" not in lab:
-                continue
-            frame, slot = key.split("#")
-            if not frame.startswith("live"):          # sessions only, skip seeds
-                continue
-            path = str(card_dir / f"{frame}_{slot}.png")
-            if not os.path.exists(path):
-                continue
-            rows.append((os.path.getmtime(path), path, frame.split("_")[0],
-                         slot, lab["rank"] + suit.get(lab["suit"], "?")))
-        # one label per session (its earliest bank), so the column groups cleanly
-        for pid in {r[2] for r in rows}:
-            self._review_sessions[pid] = self._session_label(
-                min(r[0] for r in rows if r[2] == pid))
-        for mt, path, pid, slot, card in sorted(rows, reverse=True):   # newest first
-            when = datetime.datetime.fromtimestamp(mt).strftime("%H:%M:%S")
-            self._add_review_row(self._review_sessions[pid], when, slot, card,
-                                 path, top=False)      # desc order + append = newest on top
-        self._update_review_count()
+    def _reload_labels_list(self, select=None):
+        """Rebuild the list from disk (newest first). Cheap enough for a button /
+        post-edit; not run per-frame."""
+        self._lib.reload()
+        for it in self.labels_tree.get_children():
+            self.labels_tree.delete(it)
+        self._labels_path.clear()
+        self._labels_key.clear()
+        self._labels_needs = 0
+        for e in self._lib.entries():                 # newest first
+            self._labels_row(e, top=False)
+            if not e["labeled"] and not e["skip"]:
+                self._labels_needs += 1
+        # current session's banks are now in the list; don't let _append re-add them
+        self._live_seen = len(self._sess["advisor"].banked) if self._sess else 0
+        self._update_labels_count()
+        if select and self.labels_tree.exists(select):
+            self.labels_tree.selection_set(select)
+            self.labels_tree.see(select)
 
-    def _refresh_review(self):
-        """Append the running advisor's newly-banked exemplars (live, at the top).
-        Cheap: only the new tail each tick. Deduped against the disk history by path."""
+    def _append_live_banks(self):
+        """Per-tick: add the running advisor's freshly-banked (already-labeled) crops
+        at the top, without a full disk rescan."""
         s = self._sess
         if not s:
             return
         banked = s["advisor"].banked
-        while self._review_seen < len(banked):
-            b = banked[self._review_seen]
-            self._review_seen += 1
+        while self._live_seen < len(banked):
+            b = banked[self._live_seen]
+            self._live_seen += 1
             path = b.get("path")
-            pid = os.path.basename(path).split("_")[0] if path else "current"
-            sess = self._review_sessions.get(pid)
-            if not sess:
-                sess = f"Today {b['time'][:5]}"       # this session's first bank time
-                self._review_sessions[pid] = sess
-            self._add_review_row(sess, b["time"], b["slot"], b["card"], path, top=True)
-        self._update_review_count()
+            if not path or self.labels_tree.exists(path):
+                continue
+            slot = b["slot"]
+            vals = (b["time"], "Session", self._SLOT_HUMAN.get(slot, slot), b["card"])
+            self.labels_tree.insert("", 0, iid=path, values=vals)
+            self._labels_path[path] = path
+            self._labels_key[path] = self._key_from(path, slot)
+        self._update_labels_count()
 
-    def _update_review_count(self):
-        n = len(self.review_tree.get_children())
-        self._review_count.configure(text=f"{n} banked")
+    def _update_labels_count(self):
+        n = len(self.labels_tree.get_children())
+        self._labels_count.configure(text=f"{n} crops · {self._labels_needs} need a label")
 
-    def _show_review_crop(self):
-        sel = self.review_tree.selection()
+    def _show_label_crop(self):
+        sel = self.labels_tree.selection()
         if not sel:
             return
-        path = self._review_paths.get(sel[0])
-        vals = self.review_tree.item(sel[0], "values")
-        if not path or not os.path.exists(path):
-            self._review_img = None
-            self._review_preview.configure(image="", text="(crop not on disk)")
+        iid = sel[0]
+        path = self._labels_path.get(iid)
+        if path and os.path.exists(path):
+            try:
+                img = self.tk.PhotoImage(file=path)   # Tk 8.6 reads PNG natively
+                self._labels_img = img
+                self._labels_preview.configure(image=img, text="")
+            except Exception as ex:                   # noqa: BLE001
+                self._labels_img = None
+                self._labels_preview.configure(image="", text=f"(can't load: {ex})")
+        else:
+            self._labels_img = None
+            self._labels_preview.configure(image="", text="(crop not on disk)")
+        # seed the pickers with the crop's current label so a fix is one change
+        key = self._labels_key.get(iid)
+        lab = self._lib.labels.get(key, {}) if key else {}
+        self._edit_rank.set(lab.get("rank", ""))
+        self._edit_suit.set(self._SUIT_LETTER.get(lab.get("suit", ""), ""))
+
+    def _selected_key(self):
+        sel = self.labels_tree.selection()
+        if not sel:
+            self._labels_status("select a crop in the list first", err=True)
+            return None, None
+        return sel[0], self._labels_key.get(sel[0])
+
+    def _sync_after_edit(self):
+        """Keep the live session consistent with a disk edit: resync the writer (so a
+        deleted crop isn't resurrected on the next bank) and, if asked, refit the
+        detector so the change takes effect immediately."""
+        s = self._sess
+        if not s:
             return
-        try:
-            img = self.tk.PhotoImage(file=path)      # Tk 8.6 reads PNG natively
-            self._review_img = img                   # hold the ref
-            self._review_preview.configure(image=img, text=f"{vals[2]}  =  {vals[3]}")
-        except Exception as e:                        # noqa: BLE001
-            self._review_img = None
-            self._review_preview.configure(image="", text=f"(can't load crop: {e})")
+        adv = s["advisor"]
+        if getattr(adv, "training", None) is not None:
+            try:
+                adv.training.reload()
+            except Exception:                         # noqa: BLE001
+                pass
+        if self._refit_var.get() and getattr(adv, "card_reader", None) is not None:
+            try:
+                adv.card_reader.reload()
+            except Exception as ex:                    # noqa: BLE001
+                self._labels_status(f"refit failed: {ex}", err=True)
+
+    def _save_label(self):
+        iid, key = self._selected_key()
+        if not key:
+            return
+        r, su = self._edit_rank.get(), self._edit_suit.get()
+        if not (r and su):
+            self._labels_status("pick a rank and a suit", err=True)
+            return
+        self._lib.reload()                            # pick up any live banks first
+        self._lib.set_label(key, r, su)
+        self._sync_after_edit()
+        self._reload_labels_list(select=iid)
+        self._labels_status(f"labelled {self._SLOT_HUMAN.get(key.split('#')[1])} = {r}{su}")
+
+    def _skip_label(self):
+        iid, key = self._selected_key()
+        if not key:
+            return
+        self._lib.reload()
+        self._lib.set_skip(key)
+        self._sync_after_edit()
+        self._reload_labels_list(select=iid)
+        self._labels_status(f"marked {key.split('#')[1]} as skip (excluded from training)")
+
+    def _delete_label(self):
+        iid, key = self._selected_key()
+        if not key:
+            return
+        self._lib.reload()
+        self._lib.delete(key)
+        self._sync_after_edit()
+        self._reload_labels_list()
+        self._labels_img = None
+        self._labels_preview.configure(image="", text="(select a crop to preview)")
+        self._labels_status(f"deleted {key}")
+
+    def _labels_status(self, msg, err=False):
+        self._labels_msg.configure(text=msg, foreground="#a00" if err else "#070")
 
     def _open_cards_dir(self):
         d = ROOT / "data" / "poker_cards"
@@ -822,18 +919,7 @@ class LauncherApp:
             else:
                 subprocess.Popen(["xdg-open", str(d)])
         except Exception as e:                        # noqa: BLE001
-            self.status.configure(text=f"can't open folder: {e}", foreground="#a00")
-
-    def _clear_review(self):
-        """Clear the Review LIST only — the saved crops/labels on disk are untouched.
-        (Refresh reloads them.)"""
-        for item in self.review_tree.get_children():
-            self.review_tree.delete(item)
-        self._review_paths.clear()
-        self._review_sessions.clear()
-        self._review_img = None
-        self._review_preview.configure(image="", text="(select a row to preview the learned crop)")
-        self._update_review_count()
+            self._labels_status(f"can't open folder: {e}", err=True)
 
 
 _MUTEX_NAME = "rgg-advisor-launcher"
