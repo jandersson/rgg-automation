@@ -14,8 +14,10 @@ def test_extract_obscured_pulls_partial_slots(tmp_path):
     cw, ch = cfg["corner"]
     hx, hy = cfg["hole"][0]
     frame = np.full((1080, 1920, 3), (70, 120, 40), np.uint8)      # green felt, no cards
-    # paint ~30% of the hole-0 corner white -> obscured band (0.15-0.55); other slots felt
-    frame[hy:hy + ch // 3, hx:hx + cw] = 235
+    # a white card filling the hole-0 slot (low central felt -> passes the felt filter)...
+    frame[hy - 12:hy + 388, hx:hx + 278] = 235
+    # ...with ~70% of the index corner covered -> corner white-fraction in (0.15, 0.55)
+    frame[hy:hy + ch, hx:hx + int(cw * 0.7)] = 30
     fp = tmp_path / "f.png"
     cv2.imwrite(str(fp), frame)
     cards = tmp_path / "cards"

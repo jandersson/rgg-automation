@@ -285,14 +285,18 @@ def build_poker_task(frame_glob_or_paths, config_path="config/regions.json",
 
 
 def extract_obscured(frame_glob_or_paths, card_dir="data/poker_cards",
-                     config_path="config/regions.json", lo=0.15, hi=0.55, dedup=8):
+                     config_path="config/regions.json", lo=0.15, hi=0.55, dedup=8,
+                     max_felt=0.45):
     """Mine partially-covered card slots from frames and write them as UNLABELED
     crops into the label library, for the Labels-tab second pass to label or skip.
 
     The live ``card_present`` gate (corner >55% white) excludes obscured cards (a
     banner/tooltip over the slot), so they never reach training. This pulls the
     in-between slots — corner white-fraction in ``(lo, hi)`` — as whole-card crops,
-    deduped against the library and each other. Returns ``(written, scanned)``."""
+    deduped against the library and each other. Crops whose CENTRE is mostly felt
+    (> ``max_felt``) are dropped: those are dealing-animation / sliver frames where
+    the fixed ROI spans the gap between cards, not a single obscured card. Returns
+    ``(written, scanned)``."""
     import cv2
     import numpy as np
     from ..vision.locate import _WHITE_LO, _WHITE_HI
@@ -334,6 +338,11 @@ def extract_obscured(frame_glob_or_paths, card_dir="data/poker_cards",
             l, t, w, h = whole_roi((x, y), name)
             crop = im[max(t, 0):t + h, max(l, 0):l + w]
             if crop.shape[:2] != (h, w):
+                continue
+            core = crop[int(0.12 * h):int(0.88 * h), int(0.12 * w):int(0.88 * w)]
+            felt = float(cv2.inRange(cv2.cvtColor(core, cv2.COLOR_BGR2HSV),
+                                     (35, 40, 25), (90, 255, 200)).mean()) / 255.0
+            if felt > max_felt:                          # mostly felt -> transition/sliver, skip
                 continue
             s = sig(crop)
             if any(float(np.mean(np.abs(s - o))) < dedup for o in sigs):  # ...and each other
