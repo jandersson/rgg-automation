@@ -11,6 +11,7 @@ exact), then asks the engine if one is wired up.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 
@@ -31,7 +32,14 @@ class UsiEngine:
 
     def __init__(self, path, options: dict | None = None):
         # ``path`` may be the executable, or a full command list (exe + args).
-        self.cmd = list(path) if isinstance(path, (list, tuple)) else [path]
+        cmd = list(path) if isinstance(path, (list, tuple)) else [path]
+        # Resolve the executable to an absolute path: a bare relative path breaks
+        # under Popen when the child's working directory differs from ours.
+        exe = os.path.expanduser(cmd[0])
+        if os.path.sep in exe or (os.altsep and os.altsep in exe):
+            exe = os.path.abspath(exe)
+        cmd[0] = exe
+        self.cmd = cmd
         self.options = options or {}
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()

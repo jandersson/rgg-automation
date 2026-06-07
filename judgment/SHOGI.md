@@ -101,16 +101,36 @@ search), then asks the engine. Without an engine it still solves mates.
 
 ---
 
-## 5. The USI engine (decided: yes, use one)
+## 5. The USI engine (verified: Fairy-Stockfish)
 
 The advisor drives any engine that speaks **USI** (Universal Shogi Interface)
-over stdin/stdout — `judgment_assist/shogi/engine.py::UsiEngine`. Point
-`--engine` at the binary; that's the whole integration. Even a modest engine far
-outclasses Judgment's NPCs.
+over stdin/stdout — `judgment_assist/shogi/engine.py::UsiEngine`. Even a modest
+engine far outclasses Judgment's NPCs.
 
-> Engine acquisition + a verified default path are tracked as the next step — once
-> a binary is wired and confirmed, the exact download and any `setoption` needed
-> get pinned here.
+**Default engine: Fairy-Stockfish 14 (largeboard build).** Chosen because it's a
+single self-contained `.exe`, speaks USI, and **defaults to the shogi variant
+with no eval file** (classical eval) — no NNUE/ONNX download dance. Verified
+end-to-end against `UsiEngine` (`usiok`/`readyok`/legal `bestmove`).
+
+Setup (one-time):
+
+1. Download the `*-largeboard` build from
+   <https://github.com/fairy-stockfish/Fairy-Stockfish/releases> and drop the
+   `.exe` in `judgment/engines/` (gitignored).
+2. `cp config/shogi.example.json config/shogi.json` and set `engine` to its path.
+   `config/shogi.json` is gitignored (machine-specific, like `regions.json`).
+
+Engine resolution order: `--engine` flag → `$JUDGMENT_SHOGI_ENGINE` →
+`config/shogi.json`. Optional `usi_options` in that file become `setoption`
+commands at startup (e.g. `Threads`, `Hash`; `Skill_Level` -20..20 to weaken it).
+
+Notes:
+- Fairy-Stockfish's USI mode already selects the shogi variant, so no
+  `UCI_Variant` option is required. Its move output is standard USI
+  (`7g7f`, `G*5b`), compatible with `python-shogi`.
+- Stronger but heavier alternative: **YaneuraOu** (needs a separate NNUE/ONNX
+  eval). Drop its binary in `engines/`, point `config/shogi.json` at it — the
+  driver is engine-agnostic.
 
 ---
 

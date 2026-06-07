@@ -1,0 +1,8 @@
+{
+  "_comment": "Copy to shogi.json (gitignored) to make `cli shogi` use a USI engine without --engine. 'engine' is the path to a USI engine binary (absolute, or relative to the judgment/ dir). 'usi_options' are setoption name/value pairs sent at startup. Verified default: Fairy-Stockfish 14 largeboard, which speaks USI and defaults to the shogi variant with no eval file (classical eval), strong enough to beat Judgment's NPCs. Get it from https://github.com/fairy-stockfish/Fairy-Stockfish/releases (the *-largeboard build) and drop it in judgment/engines/.",
+  "engine": "engines/fairy-stockfish-largeboard.exe",
+  "usi_options": {
+    "Threads": 2,
+    "Hash": 128
+  }
+}

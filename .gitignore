@@ -12,6 +12,7 @@ venv/
 
 # User-specific calibration & captured assets (machine/resolution dependent)
 judgment/config/regions.json
+judgment/config/shogi.json
 judgment/captures/
 judgment/data/templates/
 judgment/data/results/
@@ -24,3 +25,6 @@ judgment/data/poker/
 judgment/data/poker_cards/
 judgment/data/poker_templates/
 judgment/data/poker_digits/
+
+# Shogi USI engine binaries (downloaded per-machine, not committed)
+judgment/engines/

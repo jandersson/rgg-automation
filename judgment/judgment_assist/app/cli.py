@@ -172,6 +172,25 @@ def run_mahjong(a):
 
 
 # -------------------------------------------------------------------- shogi ---
+def _resolve_shogi_engine(cli_path):
+    """Engine command + USI options: --engine flag > $JUDGMENT_SHOGI_ENGINE >
+    config/shogi.json. Returns ``(path_or_cmd, options)`` or ``(None, {})``."""
+    import json
+    import os
+
+    if cli_path:
+        return cli_path, {}
+    env = os.environ.get("JUDGMENT_SHOGI_ENGINE")
+    if env:
+        return env, {}
+    try:
+        with open("config/shogi.json", encoding="utf-8") as f:
+            cfg = json.load(f)
+        return cfg.get("engine"), cfg.get("usi_options", {})
+    except FileNotFoundError:
+        return None, {}
+
+
 def _show_shogi(state, engine, mate_moves, movetime):
     print(state.render())
     if state.is_game_over():
@@ -188,8 +207,10 @@ def _show_shogi(state, engine, mate_moves, movetime):
 
 def run_shogi(a):
     engine = None
-    if a.engine:
-        engine = UsiEngine(a.engine).start()
+    engine_path, usi_options = _resolve_shogi_engine(a.engine)
+    if engine_path:
+        engine = UsiEngine(engine_path, options=usi_options).start()
+        print(f"[engine: {engine_path}]")
     try:
         state = ShogiState(a.sfen) if a.sfen else ShogiState()
         if a.move:
