@@ -221,9 +221,17 @@ reading that digit is a TODO); the hand cursor over a pool hides it for that fra
 
 **Promoted pieces** aren't in the opening, so they have no template and read as
 `None` (kept as the prior piece by persistence — a misread until templated). The
-live loop banks *isolated* unread cells (a lone promoted piece, not the hand's
-contiguous blob) to `data/shogi/review/`; label those and `add_templates()`
-extends the library.
+live loop banks unread cells (no kanji strokes from the hand are filtered out) to
+`data/shogi/review/`.
+
+**Labelling them (Shogi Labels tab).** Promoted-kanji disambiguation (Horse 馬 vs
+Dragon 龍, the 成-minors) needs human eyes, so it's manual: the **Shogi Labels**
+tab queues the `review/` crops — pick one, look at the picture, set owner + piece +
+promoted, and Save writes a correctly-labelled template (`save_template_from_crop`).
+"Capture unread" pulls the current board's unreadable cells into the queue on
+demand; the template manager deletes a mislabel. After labelling, hit **New game
+(reset)** on the Shogi tab to load the new templates. Templated so far depends on
+what you've labelled; the opening covers all unpromoted pieces automatically.
 
 **Readable advice.** The advice names the piece and marks the move on a labelled
 board, e.g. `BEST MOVE: Silver 3i → 4h` with `F`/`T` markers and a legend

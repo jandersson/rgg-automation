@@ -100,6 +100,41 @@ def build_templates(frame, board_roi, out_dir, layout=OPENING_LAYOUT):
     return written
 
 
+def save_template_from_crop(crop_img, code, out_dir):
+    """Label a cell crop: save ``crop_img`` as the template for ``code`` (e.g.
+    ``"+r"``), merging the manifest. This is the manual-labelling entry point —
+    the human assigns the piece, so it's authoritative. Returns ``code``."""
+    if not _HAVE_DEPS:
+        raise RuntimeError("shogi templates need: pip install opencv-python numpy")
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, MANIFEST)
+    manifest = json.load(open(path, encoding="utf-8")) if os.path.exists(path) else {}
+    stem = _safe_name(code) + ".png"
+    cv2.imwrite(os.path.join(out_dir, stem), crop_img)
+    manifest[stem] = code
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+    return code
+
+
+def remove_template(code, out_dir):
+    """Delete the template for ``code`` (undo a mislabel). Returns True if removed."""
+    path = os.path.join(out_dir, MANIFEST)
+    if not os.path.exists(path):
+        return False
+    manifest = json.load(open(path, encoding="utf-8"))
+    stem = next((s for s, cd in manifest.items() if cd == code), None)
+    if stem is None:
+        return False
+    manifest.pop(stem)
+    fp = os.path.join(out_dir, stem)
+    if os.path.exists(fp):
+        os.remove(fp)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+    return True
+
+
 def add_templates(frame, board_roi, layout, out_dir):
     """Add/overwrite templates for the occupied cells in a (partial) ``layout`` —
     e.g. a mid-game capture to pick up promoted pieces. Merges into the manifest."""

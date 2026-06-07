@@ -26,7 +26,10 @@ def test_read_hand_empty_tray_is_empty():
     assert read_hand(blank, [0, 0, 300, 400], natives, threshold=0.6) == {}
 
 
-def test_read_hands_reads_your_captured_pawn_from_real_frame():
+def test_read_hands_runs_on_a_real_frame():
+    """Smoke test on real pixels: read_hands returns a sane {code: count>=1} dict
+    (the synthetic tests cover the actual finding). Game state varies frame to
+    frame, so we don't assert a specific captured piece."""
     pytest.importorskip("numpy")
     cv2 = pytest.importorskip("cv2")
     from judgment_assist.app.launcher import ROOT
@@ -40,4 +43,6 @@ def test_read_hands_reads_your_captured_pawn_from_real_frame():
     if "hand_you" not in sh or "hand_opp" not in sh:
         pytest.skip("komadai ROIs not calibrated")
     hands = read_hands(cv2.imread(frames[-1]), sh["hand_you"], sh["hand_opp"], str(tdir))
-    assert hands.get("P", 0) >= 1            # the pawn captured into your pool
+    assert isinstance(hands, dict)
+    for code, n in hands.items():
+        assert n >= 1 and code.lstrip("+").upper() in "PLNSGBRK"
