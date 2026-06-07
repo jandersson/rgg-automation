@@ -85,6 +85,20 @@ def cell_occupied(crop, threshold=18.0):
     return cell_score(crop) >= threshold
 
 
+def glyph_fraction(crop):
+    """Fraction of dark (kanji-stroke) pixels in the cell centre. A piece's black
+    kanji gives ~0.02-0.06; the skin-toned hand cursor gives ~0.00-0.005 — so this
+    cleanly separates a real glyph from the hand (which has no dark strokes)."""
+    if crop is None or getattr(crop, "size", 0) == 0:
+        return 0.0
+    g = crop.astype("float32")
+    if g.ndim == 3:
+        g = g.mean(axis=2)
+    h, w = g.shape
+    m = g[int(h * 0.15):int(h * 0.85), int(w * 0.15):int(w * 0.85)]
+    return float((m < 70).mean()) if m.size else 0.0
+
+
 def occupancy_grid(frame, board_roi, threshold=18.0):
     """9×9 list of bools — which cells look occupied."""
     return [[cell_occupied(c, threshold) for c in row]
@@ -207,6 +221,8 @@ class ShogiBoardReader:
         out = []
         for r, row in enumerate(self.split(frame)):
             for c, crop in enumerate(row):
+                if glyph_fraction(crop) < 0.015:
+                    continue                         # no kanji strokes -> hand/empty, not a piece
                 code, score = self.recognizer.classify_conf(crop)
                 if code == "":
                     continue                         # confidently empty
