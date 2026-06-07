@@ -46,3 +46,11 @@ def test_no_forced_mate_returns_none():
 def test_max_moves_validated():
     with pytest.raises(ValueError):
         find_mate(shogi.Board(), 0)
+
+
+def test_find_mate_respects_node_budget():
+    # a deep no-check-required search would be enormous; a tiny budget must make it
+    # give up (return None) rather than hang.
+    assert find_mate(shogi.Board(), 7, require_check=False, max_nodes=50) is None
+    # the budget never hides an immediate mate
+    assert find_mate(shogi.Board(MATE_IN_1), 1, max_nodes=50) == ["G*5b"]

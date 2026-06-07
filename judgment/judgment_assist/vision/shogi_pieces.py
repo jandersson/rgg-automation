@@ -109,7 +109,12 @@ def save_template_from_crop(crop_img, code, out_dir):
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, MANIFEST)
     manifest = json.load(open(path, encoding="utf-8")) if os.path.exists(path) else {}
-    stem = _safe_name(code) + ".png"
+    # Additive: never overwrite an existing template — pick a fresh filename so a
+    # new label ADDS another example for this code rather than clobbering the base.
+    base = _safe_name(code)
+    stem, n = base + ".png", 2
+    while stem in manifest:
+        stem, n = f"{base}_{n}.png", n + 1
     cv2.imwrite(os.path.join(out_dir, stem), crop_img)
     manifest[stem] = code
     with open(path, "w", encoding="utf-8") as f:
@@ -118,18 +123,20 @@ def save_template_from_crop(crop_img, code, out_dir):
 
 
 def remove_template(code, out_dir):
-    """Delete the template for ``code`` (undo a mislabel). Returns True if removed."""
+    """Delete *all* templates for ``code`` (undo a mislabel). Returns True if any
+    were removed."""
     path = os.path.join(out_dir, MANIFEST)
     if not os.path.exists(path):
         return False
     manifest = json.load(open(path, encoding="utf-8"))
-    stem = next((s for s, cd in manifest.items() if cd == code), None)
-    if stem is None:
+    stems = [s for s, cd in manifest.items() if cd == code]
+    if not stems:
         return False
-    manifest.pop(stem)
-    fp = os.path.join(out_dir, stem)
-    if os.path.exists(fp):
-        os.remove(fp)
+    for stem in stems:
+        manifest.pop(stem)
+        fp = os.path.join(out_dir, stem)
+        if os.path.exists(fp):
+            os.remove(fp)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
     return True
@@ -174,7 +181,7 @@ class PieceRecognizer:
             raise RuntimeError("shogi recognition needs: pip install opencv-python numpy")
         self.threshold = threshold
         self.occ_threshold = occ_threshold
-        self.templates = {}                       # code -> canonical float32
+        self.templates = {}                       # code -> [canonical float32, ...]
         path = os.path.join(templates_dir, MANIFEST)
         if not os.path.exists(path):
             raise RuntimeError(f"no template manifest in {templates_dir} "
@@ -182,12 +189,12 @@ class PieceRecognizer:
         for stem, code in json.load(open(path, encoding="utf-8")).items():
             img = cv2.imread(os.path.join(templates_dir, stem))
             if img is not None:
-                self.templates[code] = _canon(img)
+                self.templates.setdefault(code, []).append(_canon(img))
 
     def scores(self, crop):
-        """``{code: ncc}`` for every template (diagnostics / threshold tuning)."""
+        """``{code: best ncc}`` over each code's templates (diagnostics/tuning)."""
         c = _canon(crop)
-        return {code: _ncc(c, t) for code, t in self.templates.items()}
+        return {code: max(_ncc(c, t) for t in tl) for code, tl in self.templates.items()}
 
     def classify(self, crop):
         """``""`` empty, a piece code when confident, or ``None`` when uncertain
@@ -204,8 +211,8 @@ class PieceRecognizer:
             return "", 1.0
         best_code, best = None, -1.0
         c = _canon(crop)
-        for code, t in self.templates.items():
-            s = _ncc(c, t)
+        for code, tl in self.templates.items():
+            s = max(_ncc(c, t) for t in tl)
             if s > best:
                 best, best_code = s, code
         return (best_code if best >= self.threshold else None), best

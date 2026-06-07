@@ -60,6 +60,21 @@ def test_stable_board_obscured_count_and_reset():
 
 
 # ----------------------------------------------------- recognizer (synthetic) ---
+def test_save_template_is_additive_not_clobbering(tmp_path):
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("cv2")
+    from judgment_assist.vision.shogi_pieces import (
+        MANIFEST, PieceRecognizer, save_template_from_crop)
+    a = np.zeros((90, 80, 3), np.uint8); a[20:70, 30:50] = 255
+    b = np.zeros((90, 80, 3), np.uint8); b[10:80, 18:62] = 200
+    save_template_from_crop(a, "+r", str(tmp_path))
+    save_template_from_crop(b, "+r", str(tmp_path))      # must ADD, not overwrite
+    man = json.load(open(tmp_path / MANIFEST, encoding="utf-8"))
+    assert sum(1 for c in man.values() if c == "+r") == 2
+    rec = PieceRecognizer(str(tmp_path))
+    assert len(rec.templates["+r"]) == 2                  # both examples loaded
+
+
 def test_recognizer_classifies_synthetic_templates(tmp_path):
     np = pytest.importorskip("numpy")
     cv2 = pytest.importorskip("cv2")
