@@ -17,8 +17,10 @@
     "opp_bet": [[422, 120, 130, 46], [1035, 120, 130, 46], [1652, 120, 130, 46]],
     "opp_banner": [[200, 272, 95, 42], [820, 272, 95, 42], [1450, 272, 95, 42]]
   },
-  "_shogi_comment": "Shogi board: one box [left, top, width, height] around the 9x9 playing grid (tight to the outer grid lines); the 81 cells divide out evenly. Build it with: calibrate mark --game shogi --image <a saved shogi frame> (or --window Judgment). hand_black/hand_white (the komadai trays) are optional and unused for now. Values below are a placeholder — recalibrate for your resolution.",
+  "_shogi_comment": "Shogi: 'board' is one box [left, top, width, height] around the 9x9 playing grid (tight to the outer grid lines); the 81 cells divide out evenly. 'hand_you'/'hand_opp' box the two captured-piece pools (komadai) — your pool (bottom-right) and the opponent's (top-left) — so the advisor reads pieces in hand for drop advice. Build with: calibrate mark --game shogi --image <a saved shogi frame> (or --window Judgment). Values below are placeholders — recalibrate for your resolution.",
   "shogi": {
-    "board": [0, 0, 0, 0]
+    "board": [0, 0, 0, 0],
+    "hand_you": [0, 0, 0, 0],
+    "hand_opp": [0, 0, 0, 0]
   }
 }

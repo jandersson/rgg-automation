@@ -44,8 +44,8 @@ SPECS = {
     # for now; ESC to skip them.
     "shogi": [
         ("board", "single", "the whole 9x9 PLAYING GRID — tight to the outer grid lines"),
-        ("hand_black", "single", "YOUR captured-pieces tray (komadai) — optional, ESC to skip"),
-        ("hand_white", "single", "the OPPONENT's captured-pieces tray — optional, ESC to skip"),
+        ("hand_you", "single", "YOUR captured-pieces pool (komadai, bottom-right) — for drop advice"),
+        ("hand_opp", "single", "the OPPONENT's captured-pieces pool (top-left)"),
     ],
     # HUD badges: the numeric totals Judgment shows on a decision frame. Box the
     # NUMBER only (tight around the digits), not the whole badge or the "Total"

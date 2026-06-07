@@ -462,12 +462,28 @@ class ShogiTab:
         # prior value, so successive captures (as the hand moves) fill the board in.
         reader.update(frame)
         obscured = reader.obscured(frame)
-        sfen = reader.sfen()
+        sfen = self._sfen_with_hands(frame, cfg)
         self.sfen.set(sfen)
         self.moves.set("")
         note = f" ({obscured} cell(s) obscured — kept prior; capture again)" if obscured else ""
         self.cap_status.configure(text=f"read board{note}", foreground="#070")
         self._advise()                              # show the best move for the read position
+
+    def _sfen_with_hands(self, frame, cfg):
+        """Board grid (persistent) + captured pieces read from the two pools ->
+        full SFEN. Falls back to empty hands if the pools aren't calibrated."""
+        from ..vision.shogi_board import grid_to_sfen
+        hands = None
+        sh = cfg.get("shogi") or {}
+        you, opp = sh.get("hand_you"), sh.get("hand_opp")
+        if you and opp:
+            try:
+                from ..vision.shogi_hand import read_hands
+                hands = read_hands(frame, you, opp,
+                                   str(self._root_dir / "data" / "shogi" / "templates"))
+            except Exception:                        # noqa: BLE001 - hands optional
+                hands = None
+        return grid_to_sfen(self._board.grid, "b", hands)
 
     def _ensure_board_reader(self, board_roi):
         """A persistent StableBoardReader if a template library exists, else None.
@@ -554,7 +570,7 @@ class ShogiTab:
                 pass                                 # not focused / paused -> keep last advice
             else:
                 self._board.update(frame)
-                sfen = self._board.sfen()
+                sfen = self._sfen_with_hands(frame, self._cfg_live)
                 if sfen != self._last_live_sfen:     # board changed -> recompute
                     self._last_live_sfen = sfen
                     self.sfen.set(sfen)
@@ -586,9 +602,15 @@ class ShogiTab:
             (out / "frames").mkdir(parents=True, exist_ok=True)
             cv2.imwrite(str(out / "frames" / f"live_{tag}.png"), frame)
             board = (self._cfg_live.get("shogi") or {}).get("board")
-            unread = self._board.reader.uncertain_cells(frame)
-            if board and 0 < len(unread) <= 6:       # a few unread cells -> real unknowns
-                save_review_cells(frame, board, unread, str(out / "review"), f"live_{tag}")
+            unread = set(self._board.reader.uncertain_cells(frame))
+            # The hand cursor covers a CONTIGUOUS blob; a promoted piece is an
+            # ISOLATED unread cell. Bank only cells with no unread neighbour (8-conn)
+            # so review/ collects real unknowns, not fingers.
+            isolated = [(r, c) for (r, c) in unread
+                        if not any((r + dr, c + dc) in unread
+                                   for dr in (-1, 0, 1) for dc in (-1, 0, 1) if (dr, dc) != (0, 0))]
+            if board and isolated:
+                save_review_cells(frame, board, isolated, str(out / "review"), f"live_{tag}")
         except Exception:                            # noqa: BLE001 - never break the loop
             pass
 

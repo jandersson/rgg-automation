@@ -209,9 +209,21 @@ move at a time, so the model stays correct.
   the position changes. It skips frames when the game isn't focused or is paused,
   so it never reads a stale screen. Untick (or quit) to stop.
 
-*New game (reset)* clears the persistent board. *Promoted pieces* and
-*pieces-in-hand* aren't in the opening — capture a mid-game board and
-`add_templates()` extends the library.
+*New game (reset)* clears the persistent board.
+
+**Pieces in hand (komadai).** Captured pieces sit in the two pools and can be
+*dropped*, so the advisor reads them: `vision/shogi_hand.py` slides the piece
+templates over each pool ROI (`shogi.hand_you` = your pool, bottom-right;
+`shogi.hand_opp` = opponent's, top-left) and counts the hits into the SFEN hands
+field. Calibrate the pools with `calibrate mark --game shogi`. v1 counts distinct
+icons (if the game collapses duplicates into one icon + "×N", it undercounts —
+reading that digit is a TODO); the hand cursor over a pool hides it for that frame.
+
+**Promoted pieces** aren't in the opening, so they have no template and read as
+`None` (kept as the prior piece by persistence — a misread until templated). The
+live loop banks *isolated* unread cells (a lone promoted piece, not the hand's
+contiguous blob) to `data/shogi/review/`; label those and `add_templates()`
+extends the library.
 
 **Readable advice.** The advice names the piece and marks the move on a labelled
 board, e.g. `BEST MOVE: Silver 3i → 4h` with `F`/`T` markers and a legend
