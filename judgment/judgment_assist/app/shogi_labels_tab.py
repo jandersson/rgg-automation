@@ -64,6 +64,7 @@ class ShogiLabelsTab:
         btns = ttk.Frame(left); btns.pack(fill="x", pady=4)
         ttk.Button(btns, text="Refresh", command=self._reload).grid(row=0, column=0)
         ttk.Button(btns, text="Capture unread", command=self._capture_unread).grid(row=0, column=1, padx=4)
+        ttk.Button(btns, text="Remove empty", command=self._remove_empty).grid(row=1, column=0, pady=2)
         self.count = ttk.Label(left, text="", foreground="#070"); self.count.pack(anchor="w")
 
         # right: preview + the labelling controls
@@ -172,6 +173,22 @@ class ShogiLabelsTab:
         self._reload()
         self.status.configure(text=f"saved template '{code}' — reset the board on the Shogi tab to use it",
                               foreground="#070")
+
+    def _remove_empty(self):
+        """Bulk-delete crops with no kanji strokes (empty cells / hand fragments
+        banked before the glyph filter)."""
+        import cv2
+        from ..vision.shogi_board import glyph_fraction
+        removed = 0
+        for p in list(self._paths):
+            img = cv2.imread(p)
+            if img is None or glyph_fraction(img) < 0.012:
+                try:
+                    os.remove(p); removed += 1
+                except OSError:
+                    pass
+        self._reload()
+        self.status.configure(text=f"removed {removed} empty crop(s)", foreground="#070")
 
     def _delete_crop(self):
         p = self._selected_path()
