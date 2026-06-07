@@ -101,7 +101,8 @@ class ShogiLabelsTab:
         self.tpl_box = ttk.Combobox(tm, textvariable=self.templates, width=14, state="readonly")
         self.tpl_box.grid(row=0, column=0, **pad)
         ttk.Button(tm, text="Delete template", command=self._delete_template).grid(row=0, column=1, **pad)
-        self.tpl_status = ttk.Label(tm, text="", foreground="#070"); self.tpl_status.grid(row=0, column=2, **pad)
+        ttk.Button(tm, text="Trim duplicates", command=self._trim_templates).grid(row=0, column=2, **pad)
+        self.tpl_status = ttk.Label(tm, text="", foreground="#070"); self.tpl_status.grid(row=0, column=3, **pad)
 
         self._reload()
 
@@ -200,6 +201,12 @@ class ShogiLabelsTab:
             pass
         self._reload()
         self.status.configure(text="crop deleted", foreground="#070")
+
+    def _trim_templates(self):
+        from ..vision.shogi_pieces import prune_templates
+        n = prune_templates(str(self._templates_dir), keep=5)
+        self._reload_templates()
+        self.tpl_status.configure(text=f"trimmed {n} redundant template(s)", foreground="#070")
 
     def _delete_template(self):
         code = self.templates.get().strip()

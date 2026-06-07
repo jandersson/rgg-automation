@@ -122,6 +122,32 @@ def save_template_from_crop(crop_img, code, out_dir):
     return code
 
 
+def prune_templates(out_dir, keep=5):
+    """Keep at most ``keep`` templates per code, delete the rest. Labelling is
+    additive, so a piece can accumulate dozens of (redundant) examples that only
+    slow matching; a handful is plenty. The canonical base name (e.g. ``b_P.png``)
+    sorts first, so it's always kept. Returns how many were removed."""
+    path = os.path.join(out_dir, MANIFEST)
+    if not os.path.exists(path):
+        return 0
+    manifest = json.load(open(path, encoding="utf-8"))
+    by_code = {}
+    for stem in sorted(manifest):                    # sorted -> base name before *_2, *_3
+        by_code.setdefault(manifest[stem], []).append(stem)
+    kept, removed = {}, 0
+    for code, stems in by_code.items():
+        for stem in stems[:keep]:
+            kept[stem] = code
+        for stem in stems[keep:]:
+            fp = os.path.join(out_dir, stem)
+            if os.path.exists(fp):
+                os.remove(fp)
+            removed += 1
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(kept, f, indent=2)
+    return removed
+
+
 def remove_template(code, out_dir):
     """Delete *all* templates for ``code`` (undo a mislabel). Returns True if any
     were removed."""

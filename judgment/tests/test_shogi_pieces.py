@@ -75,6 +75,23 @@ def test_save_template_is_additive_not_clobbering(tmp_path):
     assert len(rec.templates["+r"]) == 2                  # both examples loaded
 
 
+def test_prune_templates_caps_per_code(tmp_path):
+    import collections
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("cv2")
+    from judgment_assist.vision.shogi_pieces import (
+        MANIFEST, prune_templates, save_template_from_crop)
+    blank = np.full((90, 80, 3), 120, np.uint8)
+    for _ in range(8):
+        save_template_from_crop(blank, "+r", str(tmp_path))
+    for _ in range(2):
+        save_template_from_crop(blank, "P", str(tmp_path))
+    removed = prune_templates(str(tmp_path), keep=5)
+    cnt = collections.Counter(json.load(open(tmp_path / MANIFEST, encoding="utf-8")).values())
+    assert cnt["+r"] == 5 and cnt["P"] == 2        # +r capped, P (under cap) untouched
+    assert removed == 3
+
+
 def test_recognizer_classifies_synthetic_templates(tmp_path):
     np = pytest.importorskip("numpy")
     cv2 = pytest.importorskip("cv2")
