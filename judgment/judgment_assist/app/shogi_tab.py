@@ -149,6 +149,22 @@ def format_result(sfen, out):
     return f"{render_board(sfen, mv)}\n\n{head}{legend}"
 
 
+def board_is_playable(sfen):
+    """True only for a real, legal shogi position — used to tell "on the board"
+    from the open world (after a game ends the board ROI grabs a random scene that
+    reads as garbage). A legal position always has both kings, and python-shogi
+    must accept it."""
+    field = sfen.split()[0]
+    if "K" not in field or "k" not in field:        # both kings must be present
+        return False
+    try:
+        import shogi
+        shogi.Board(sfen)
+        return True
+    except Exception:                                # noqa: BLE001 - illegal -> not a board
+        return False
+
+
 def format_overlay_line(sfen, out):
     """Compact advice for the floating overlay."""
     mv = out.get("move")
@@ -465,6 +481,12 @@ class ShogiTab:
         sfen = self._sfen_with_hands(frame, cfg)
         self.sfen.set(sfen)
         self.moves.set("")
+        if not board_is_playable(sfen):             # not on the board (e.g. game ended)
+            self.cap_status.configure(text="no shogi board detected — are you on the board?",
+                                      foreground="#a00")
+            self._set_output(render_board(sfen) + "\n\n(not a legal position — both kings "
+                             "must be visible; capture again on the shogi board)")
+            return
         note = f" ({obscured} cell(s) obscured — kept prior; capture again)" if obscured else ""
         self.cap_status.configure(text=f"read board{note}", foreground="#070")
         self._advise()                              # show the best move for the read position
@@ -572,7 +594,10 @@ class ShogiTab:
             else:
                 self._board.update(frame)
                 sfen = self._sfen_with_hands(frame, self._cfg_live)
-                if sfen != self._last_live_sfen:     # board changed -> recompute
+                if not board_is_playable(sfen):      # game ended / not on the board
+                    self._overlay.update_text("shogi: waiting for the board…")
+                    self._last_live_sfen = None
+                elif sfen != self._last_live_sfen:   # board changed -> recompute
                     self._last_live_sfen = sfen
                     self.sfen.set(sfen)
                     self.moves.set("")

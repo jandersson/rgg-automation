@@ -1,11 +1,19 @@
 """Human-readable advice rendering (no display, no engine)."""
 from judgment_assist.app.shogi_tab import (
+    board_is_playable,
     describe_move,
     format_overlay_line,
     format_result,
     render_board,
 )
 from judgment_assist.shogi.board import START_SFEN
+
+
+def test_board_is_playable_guards_against_non_boards():
+    assert board_is_playable(START_SFEN)                       # real position
+    assert not board_is_playable("9/9/9/9/9/9/9/9/9 b - 1")    # no kings (open world/garbage)
+    assert not board_is_playable("4k4/9/9/9/9/9/9/9/9 b - 1")  # only one king
+    assert board_is_playable("4k4/9/9/9/9/9/9/9/4K4 b - 1")    # both kings -> ok
 
 DROP_POS = "4k4/9/9/9/9/9/9/9/4K4 b G 1"
 
