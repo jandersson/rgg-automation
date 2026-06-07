@@ -360,11 +360,14 @@ def test_confirm_key_dispatches_by_active_tab(tmp_path):
         calls = []
         app.labels.confirm_and_next = lambda: calls.append("labels")
         app._confirm_hotkey = lambda: calls.append("play")
+        app.shogi._do_capture = lambda: calls.append("shogi")
         app.nb.select(app.tab_labels)
         app._on_confirm_key()                  # on Labels -> mark reviewed + next
         app.nb.select(app.tab_play)
         app._on_confirm_key()                  # on Play -> confirm the hand
-        assert calls == ["labels", "play"]
+        app.nb.select(app.tab_shogi)
+        app._on_confirm_key()                  # on Shogi -> capture the board (R4 paddle)
+        assert calls == ["labels", "play", "shogi"]
     finally:
         root.destroy()
 

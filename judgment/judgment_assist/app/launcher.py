@@ -348,13 +348,19 @@ class LauncherApp:
             _key_poller(self.root, vk, self._on_confirm_key)
 
     def _on_confirm_key(self):
-        """The confirm hotkey acts on the tab you're viewing: confirm the poker hand
-        on the Play tab, or mark-reviewed + jump to the next crop on the Labels tab."""
+        """The confirm hotkey (e.g. an R4 back paddle mapped to Insert) acts on the
+        tab you're viewing: capture the board on the Shogi tab, mark-reviewed + jump
+        to the next crop on the Labels tab, else confirm the poker hand on Play."""
         try:
-            on_labels = str(self.nb.select()) == str(self.tab_labels)
+            sel = str(self.nb.select())
         except Exception:                              # noqa: BLE001
-            on_labels = False
-        (self.labels.confirm_and_next if on_labels else self._confirm_hotkey)()
+            sel = ""
+        if sel == str(self.tab_shogi):
+            self.shogi._do_capture()
+        elif sel == str(self.tab_labels):
+            self.labels.confirm_and_next()
+        else:
+            self._confirm_hotkey()
 
     def _labels_config_path(self):
         """Resolved regions.json path for the Labels tab's capture/import."""

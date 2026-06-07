@@ -128,14 +128,15 @@ class ShogiTab:
                    ).grid(row=0, column=0, **pad)
         self.cap_status = ttk.Label(cap, text="", foreground="#070")
         self.cap_status.grid(row=0, column=1, sticky="w", **pad)
-        ttk.Label(cap, text="Hotkey").grid(row=1, column=0, sticky="e", **pad)
-        self.capture_key = tk.StringVar(value="f9")
+        ttk.Label(cap, text="Extra key").grid(row=1, column=0, sticky="e", **pad)
+        self.capture_key = tk.StringVar(value="")     # optional; the paddle is the main path
         ttk.Entry(cap, textvariable=self.capture_key, width=8).grid(row=1, column=1, sticky="w")
-        ttk.Label(cap, text="Judgment PAUSES when it loses focus, so clicking this window "
-                  "grabs the paused screen. Fix: press the Hotkey (f13-f24/f9/home/... ; map a "
-                  "controller paddle to it) while the GAME is focused — instant, no pause. The "
-                  "button instead waits 3s so you can click back to the game. Calibrate the "
-                  "board box first: calibrate mark --game shogi.",
+        ttk.Label(cap, text="Judgment PAUSES when it loses focus, so clicking this window grabs "
+                  "the paused screen. Main fix: with the Shogi tab selected, press your confirm "
+                  "hotkey — the R4 back paddle / Insert (set on the Play tab) — while the GAME is "
+                  "focused. Instant, no pause. The button instead waits 3s so you can click back "
+                  "to the game. 'Extra key' is an optional separate key that captures from any "
+                  "tab. Calibrate the board box first: calibrate mark --game shogi.",
                   foreground="#888", font=("Segoe UI", 8), wraplength=500
                   ).grid(row=2, column=0, columnspan=2, sticky="w", padx=8)
         self._cap_pollers = set()
