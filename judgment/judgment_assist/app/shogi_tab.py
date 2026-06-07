@@ -13,6 +13,7 @@ so a ~1s think never freezes the launcher.
 from __future__ import annotations
 
 import json
+import queue
 import threading
 
 from ..shogi.board import ShogiState, START_SFEN
@@ -69,9 +70,12 @@ class ShogiTab:
         self._engine = None
         self._engine_started_for = None          # path the live engine was started with
         self._gen = 0                            # ignore results from superseded clicks
+        self._board = None                       # StableBoardReader (lazy; needs templates)
+        self._result_q = queue.Queue()           # worker -> main-thread results (tk isn't thread-safe)
         cfg_path, cfg_opts, cfg_movetime = load_engine_config(root_dir)
         self._engine_options = cfg_opts
         self._build(parent, cfg_path, cfg_movetime)
+        self.root.after(120, self._poll_results)
 
     # ----------------------------------------------------------------- build ---
     def _build(self, parent, cfg_path, cfg_movetime):
@@ -126,8 +130,10 @@ class ShogiTab:
         cap.grid(row=3, column=0, sticky="ew", **pad)
         ttk.Button(cap, text="Capture board (3s delay)", command=self._capture_delayed
                    ).grid(row=0, column=0, **pad)
+        ttk.Button(cap, text="New game (reset)", command=self._reset_board
+                   ).grid(row=0, column=2, **pad)
         self.cap_status = ttk.Label(cap, text="", foreground="#070")
-        self.cap_status.grid(row=0, column=1, sticky="w", **pad)
+        self.cap_status.grid(row=0, column=3, sticky="w", **pad)
         ttk.Label(cap, text="Extra key").grid(row=1, column=0, sticky="e", **pad)
         self.capture_key = tk.StringVar(value="")     # optional; the paddle is the main path
         ttk.Entry(cap, textvariable=self.capture_key, width=8).grid(row=1, column=1, sticky="w")
@@ -138,7 +144,7 @@ class ShogiTab:
                   "to the game. 'Extra key' is an optional separate key that captures from any "
                   "tab. Calibrate the board box first: calibrate mark --game shogi.",
                   foreground="#888", font=("Segoe UI", 8), wraplength=500
-                  ).grid(row=2, column=0, columnspan=2, sticky="w", padx=8)
+                  ).grid(row=2, column=0, columnspan=4, sticky="w", padx=8)
         self._cap_pollers = set()
         self.capture_key.trace_add("write", lambda *_: self._install_capture_hotkey())
         self._install_capture_hotkey()
@@ -175,10 +181,11 @@ class ShogiTab:
         self.out.insert("1.0", text)
         self.out.configure(state="disabled")
 
-    def _ensure_engine(self):
+    def _ensure_engine(self, path):
         """Lazily start (and reuse) the USI engine; restart if the path changed.
-        Runs on the worker thread — does no tk work."""
-        path = self.engine_path.get().strip()
+        Runs on the worker thread, so ``path`` is passed in (read on the main
+        thread) — never touch a tk variable here."""
+        path = (path or "").strip()
         if not path:
             return None
         if self._engine is not None and self._engine_started_for == path:
@@ -204,6 +211,7 @@ class ShogiTab:
         self._gen += 1
         gen = self._gen
         use_engine = self.use_engine.get()
+        engine_path = self.engine_path.get()     # read tk vars on the main thread only
         try:
             movetime = int(self.movetime.get() or DEFAULT_MOVETIME)
             mate_moves = int(self.mate_moves.get() or DEFAULT_MATE_MOVES)
@@ -213,7 +221,7 @@ class ShogiTab:
 
         def work():
             try:
-                engine = self._ensure_engine() if use_engine else None
+                engine = self._ensure_engine(engine_path) if use_engine else None
                 out = best_move(state, engine=engine, mate_moves=mate_moves,
                                 movetime_ms=movetime)
                 text = state.render() + "\n\n" + format_advice(out)
@@ -221,16 +229,26 @@ class ShogiTab:
             except Exception as e:               # noqa: BLE001 - report, don't crash the GUI
                 text = state.render() + f"\n\nengine error: {e}"
                 ok = False
-            self.root.after(0, lambda: self._deliver(gen, text, ok))
+            self._result_q.put((gen, text, ok))  # hand back to the main thread; never touch tk here
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _deliver(self, gen, text, ok):
-        if gen != self._gen:
-            return                               # a newer Advise superseded this one
-        self._set_output(text)
-        self.status.configure(text="" if ok else "engine error",
-                              foreground="#070" if ok else "#a00")
+    def _poll_results(self):
+        """Drain worker results on the *main* thread (tk is not thread-safe, so the
+        worker can't update widgets itself). Rescheduled for the tab's lifetime."""
+        try:
+            while True:
+                gen, text, ok = self._result_q.get_nowait()
+                if gen == self._gen:             # ignore superseded Advise calls
+                    self._set_output(text)
+                    self.status.configure(text="" if ok else "engine error",
+                                          foreground="#070" if ok else "#a00")
+        except queue.Empty:
+            pass
+        try:
+            self.root.after(120, self._poll_results)
+        except Exception:                        # noqa: BLE001 - window gone -> stop
+            pass
 
     def _install_capture_hotkey(self):
         """Poll a global key so Capture can fire while the *game* is focused (the
@@ -305,15 +323,56 @@ class ShogiTab:
             self._set_output(f"Saved {frame.shape[1]}x{frame.shape[0]} frame:\n{fpath}\n\n"
                              f"Next: calibrate mark --game shogi --image \"{fpath}\"")
             return
-        paths = save_cells(frame, board, str(out / "cells" / ts))
-        occ = occupancy_grid(frame, board)
-        n = sum(v for row in occ for v in row)
-        self.cap_status.configure(text=f"saved frame + {len(paths)} cells ({n} occupied)",
+        save_cells(frame, board, str(out / "cells" / ts))   # keep crops (extend templates later)
+
+        reader = self._ensure_board_reader(board)
+        if reader is None:                          # no template library yet -> occupancy only
+            occ = occupancy_grid(frame, board)
+            n = sum(v for row in occ for v in row)
+            grid_txt = "\n".join("".join("#" if v else "." for v in row) for row in occ)
+            self.cap_status.configure(text=f"saved frame + 81 cells ({n} occupied)",
+                                      foreground="#070")
+            self._set_output(f"Saved frame + 81 cells -> data/shogi/cells/{ts}/\n\n"
+                             f"occupancy (# = piece):\n{grid_txt}\n\n"
+                             f"No template library yet — build it from an opening capture to "
+                             f"read pieces into an SFEN.")
+            return
+
+        # Fold this frame into the persistent board: hand-obscured cells keep their
+        # prior value, so successive captures (as the hand moves) fill the board in.
+        reader.update(frame)
+        obscured = reader.obscured(frame)
+        sfen = reader.sfen()
+        self.sfen.set(sfen)
+        self.moves.set("")
+        note = f" ({obscured} cell(s) obscured — kept prior; capture again)" if obscured else ""
+        self.cap_status.configure(text=f"read board{note}", foreground="#070")
+        self._advise()                              # show the best move for the read position
+
+    def _ensure_board_reader(self, board_roi):
+        """A persistent StableBoardReader if a template library exists, else None.
+        Built once and reused so captures accumulate into one board."""
+        if self._board is not None:
+            return self._board
+        tdir = self._root_dir / "data" / "shogi" / "templates"
+        if not (tdir / "manifest.json").exists():
+            return None
+        try:
+            from ..vision.shogi_board import ShogiBoardReader, StableBoardReader
+            from ..vision.shogi_pieces import PieceRecognizer
+            rec = PieceRecognizer(str(tdir))
+            self._board = StableBoardReader(ShogiBoardReader(board_roi, recognizer=rec))
+        except Exception as e:                       # noqa: BLE001
+            self.cap_status.configure(text=f"recognizer unavailable: {e}", foreground="#a00")
+            return None
+        return self._board
+
+    def _reset_board(self):
+        """Clear the persistent board (new game)."""
+        if self._board is not None:
+            self._board.reset()
+        self.cap_status.configure(text="board reset — capture to read the new position",
                                   foreground="#070")
-        grid_txt = "\n".join("".join("#" if v else "." for v in row) for row in occ)
-        self._set_output(f"Saved frame + 81 cells -> data/shogi/cells/{ts}/\n\n"
-                         f"occupancy (# = piece):\n{grid_txt}\n\n"
-                         f"Next: label these cells into a piece template library to read SFEN.")
 
     def close(self):
         """Shut the engine down (called when the launcher quits)."""

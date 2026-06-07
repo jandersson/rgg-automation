@@ -171,13 +171,16 @@ class ShogiBoardReader:
     def split(self, frame):
         return split_board(frame, self.board_roi)
 
-    def read_grid(self, frame):
+    def classify_grid(self, frame):
+        """Raw 9×9 read: each cell is a piece code, ``""`` (empty), or ``None``
+        (uncertain — unknown glyph or hand-obscured) when a recognizer is present;
+        ``"?"``/``""`` by occupancy without one. ``flip`` is applied."""
         grid = []
         for row in self.split(frame):
             out = []
             for crop in row:
                 if self.recognizer is not None:
-                    out.append(self.recognizer.classify(crop) or "")
+                    out.append(self.recognizer.classify(crop))
                 else:
                     out.append("?" if cell_occupied(crop, self.threshold) else "")
             grid.append(out)
@@ -185,8 +188,49 @@ class ShogiBoardReader:
             grid = [list(reversed(r)) for r in reversed(grid)]
         return grid
 
+    def read_grid(self, frame):
+        """One-shot grid; uncertain cells (``None``) are coerced to empty. For a
+        live read that survives the hand cursor, use :class:`StableBoardReader`."""
+        return [["" if v is None else v for v in row] for row in self.classify_grid(frame)]
+
     def read_sfen(self, frame, side="b", hands=None, move=1):
         return grid_to_sfen(self.read_grid(frame), side=side, hands=hands, move=move)
+
+
+class StableBoardReader:
+    """Temporal persistence over a :class:`ShogiBoardReader`.
+
+    The player's hand cursor roams over the board and obscures whatever it covers;
+    those cells read ``None``. :meth:`update` keeps a running board where a ``None``
+    cell **retains its previous value** and only confident reads (a piece code, or
+    a confident empty) change it. Because shogi changes one move at a time, the
+    model stays correct while the hand moves — and successive captures accumulate
+    (capture again as the hand shifts to fill in cells it was covering)."""
+
+    def __init__(self, reader: "ShogiBoardReader"):
+        self.reader = reader
+        self.grid = [[""] * 9 for _ in range(9)]
+
+    def update(self, frame):
+        """Fold one frame into the running board; returns the current grid."""
+        raw = self.reader.classify_grid(frame)
+        for r in range(9):
+            for c in range(9):
+                v = raw[r][c]
+                if v is not None:               # confident (code or empty) -> apply
+                    self.grid[r][c] = v
+        return self.grid
+
+    def obscured(self, frame):
+        """Count of cells this frame couldn't read (hand-covered / uncertain)."""
+        raw = self.reader.classify_grid(frame)
+        return sum(1 for row in raw for v in row if v is None)
+
+    def reset(self):
+        self.grid = [[""] * 9 for _ in range(9)]
+
+    def sfen(self, side="b", hands=None, move=1):
+        return grid_to_sfen(self.grid, side=side, hands=hands, move=move)
 
 
 # --------------------------------------------------------------- capture I/O ---
