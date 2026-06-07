@@ -236,8 +236,11 @@ class ShogiTab:
         self.live_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(cap, text="Live read + overlay", variable=self.live_var,
                         command=self._toggle_live).grid(row=0, column=3, **pad)
+        self.train_var = tk.BooleanVar(value=True)   # bank live frames/cells for training
+        ttk.Checkbutton(cap, text="Save training data", variable=self.train_var
+                        ).grid(row=0, column=4, **pad)
         self.cap_status = ttk.Label(cap, text="", foreground="#070")
-        self.cap_status.grid(row=0, column=4, sticky="w", **pad)
+        self.cap_status.grid(row=0, column=5, sticky="w", **pad)
         ttk.Label(cap, text="Extra key").grid(row=1, column=0, sticky="e", **pad)
         self.capture_key = tk.StringVar(value="")     # optional; the paddle is the main path
         ttk.Entry(cap, textvariable=self.capture_key, width=8).grid(row=1, column=1, sticky="w")
@@ -246,10 +249,14 @@ class ShogiTab:
                   "hotkey — the R4 back paddle / Insert (set on the Play tab) — while the GAME is "
                   "focused. Instant, no pause. The button instead waits 3s so you can click back "
                   "to the game. 'Extra key' is an optional separate key that captures from any "
-                  "tab. Calibrate the board box first: calibrate mark --game shogi.",
+                  "tab. 'Live read + overlay' floats advice over the game, re-reading every "
+                  "~1.2s; 'Save training data' banks each distinct live position (+ unread cells "
+                  "= promoted pieces to label) to data/shogi/. Calibrate the board first: "
+                  "calibrate mark --game shogi.",
                   foreground="#888", font=("Segoe UI", 8), wraplength=500
-                  ).grid(row=2, column=0, columnspan=5, sticky="w", padx=8)
+                  ).grid(row=2, column=0, columnspan=6, sticky="w", padx=8)
         self._cap_pollers = set()
+        self._train_n = 0                        # counter for unique training filenames
         self.capture_key.trace_add("write", lambda *_: self._install_capture_hotkey())
         self._install_capture_hotkey()
 
@@ -553,6 +560,8 @@ class ShogiTab:
                     self.sfen.set(sfen)
                     self.moves.set("")
                     self._advise()                   # threaded; result updates tab + overlay
+                    if self.train_var.get():
+                        self._save_training(frame)   # bank this distinct position
         except Exception as e:                       # noqa: BLE001 - keep the loop alive
             try:
                 self._overlay.update_text(f"shogi: read hiccup ({e})")
@@ -561,6 +570,27 @@ class ShogiTab:
         finally:
             if self._live:
                 self.root.after(self.LIVE_INTERVAL_MS, self._live_tick)
+
+    def _save_training(self, frame):
+        """Bank a distinct live position for training: the full frame, plus crops
+        of the cells the recognizer couldn't read (likely promoted pieces to add to
+        the library). Banked only when a *few* cells are unread — a large unread
+        cluster is usually the hand sweeping across, which is noise."""
+        import time
+        import cv2
+        from ..vision.shogi_board import save_review_cells
+        try:
+            self._train_n += 1
+            tag = time.strftime("%Y%m%d_%H%M%S") + f"_{self._train_n:03d}"
+            out = self._root_dir / "data" / "shogi"
+            (out / "frames").mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(out / "frames" / f"live_{tag}.png"), frame)
+            board = (self._cfg_live.get("shogi") or {}).get("board")
+            unread = self._board.reader.uncertain_cells(frame)
+            if board and 0 < len(unread) <= 6:       # a few unread cells -> real unknowns
+                save_review_cells(frame, board, unread, str(out / "review"), f"live_{tag}")
+        except Exception:                            # noqa: BLE001 - never break the loop
+            pass
 
     def _stop_live(self):
         self._live = False

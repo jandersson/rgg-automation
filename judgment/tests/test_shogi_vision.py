@@ -139,3 +139,28 @@ def test_save_cells_writes_81_crops(tmp_path):
     paths = save_cells(_board_frame(), [0, 0, 90, 90], str(tmp_path))
     assert len(paths) == 81
     assert os.path.exists(tmp_path / "r0c0.png") and os.path.exists(tmp_path / "r8c8.png")
+
+
+def test_uncertain_cells_flags_occupied_but_unread():
+    pytest.importorskip("numpy")
+    pytest.importorskip("cv2")
+
+    class _NoneRec:
+        def classify(self, crop):
+            return None                  # never recognizes -> occupied cells are "unread"
+
+    reader = ShogiBoardReader([0, 0, 90, 90], recognizer=_NoneRec())
+    # _board_frame has one occupied cell (0,0); the rest are flat wood
+    assert reader.uncertain_cells(_board_frame()) == [(0, 0)]
+
+
+def test_save_review_cells_writes_named_crops(tmp_path):
+    pytest.importorskip("numpy")
+    pytest.importorskip("cv2")
+    import os
+    from judgment_assist.vision.shogi_board import save_review_cells
+    paths = save_review_cells(_board_frame(), [0, 0, 90, 90], [(0, 0), (8, 8)],
+                              str(tmp_path), "live_X")
+    assert len(paths) == 2
+    assert os.path.exists(tmp_path / "live_X_r0c0.png")
+    assert os.path.exists(tmp_path / "live_X_r8c8.png")

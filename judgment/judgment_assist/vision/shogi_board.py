@@ -196,6 +196,20 @@ class ShogiBoardReader:
     def read_sfen(self, frame, side="b", hands=None, move=1):
         return grid_to_sfen(self.read_grid(frame), side=side, hands=hands, move=move)
 
+    def uncertain_cells(self, frame, occ_threshold=16.0):
+        """Screen-coord ``(row, col)`` of cells the recognizer leaves as ``None``
+        but that look occupied — i.e. a glyph it has no template for (a promoted
+        piece) or the hand. These are the crops worth banking for labeling. No
+        ``flip`` is applied (screen coordinates, for saving cells)."""
+        if self.recognizer is None:
+            return []
+        out = []
+        for r, row in enumerate(self.split(frame)):
+            for c, crop in enumerate(row):
+                if self.recognizer.classify(crop) is None and cell_score(crop) >= occ_threshold:
+                    out.append((r, c))
+        return out
+
 
 class StableBoardReader:
     """Temporal persistence over a :class:`ShogiBoardReader`.
@@ -252,4 +266,22 @@ def save_cells(frame, board_roi, out_dir):
             p = os.path.join(out_dir, f"r{r}c{c}.png")
             cv2.imwrite(p, frame[t:t + h, l:l + w])
             paths.append(p)
+    return paths
+
+
+def save_review_cells(frame, board_roi, cells, out_dir, tag):
+    """Write just the given ``(row, col)`` cell crops to ``out_dir`` as
+    ``{tag}_r{r}c{c}.png`` — for banking unread (promoted-piece) cells from live
+    play so they can be labeled and added to the template library."""
+    import os
+
+    import cv2
+    os.makedirs(out_dir, exist_ok=True)
+    rects = cell_rects(board_roi)
+    paths = []
+    for (r, c) in cells:
+        l, t, w, h = rects[r][c]
+        p = os.path.join(out_dir, f"{tag}_r{r}c{c}.png")
+        cv2.imwrite(p, frame[t:t + h, l:l + w])
+        paths.append(p)
     return paths
