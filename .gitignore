@@ -25,6 +25,7 @@ judgment/data/poker/
 judgment/data/poker_cards/
 judgment/data/poker_templates/
 judgment/data/poker_digits/
+judgment/data/shogi/
 
 # Shogi USI engine binaries (downloaded per-machine, not committed)
 judgment/engines/

@@ -122,16 +122,26 @@ class ShogiTab:
                   foreground="#888", font=("Segoe UI", 8)).grid(row=3, column=0, columnspan=3,
                                                                 sticky="w", padx=8)
 
+        cap = ttk.LabelFrame(parent, text="Capture from game")
+        cap.grid(row=3, column=0, sticky="ew", **pad)
+        ttk.Button(cap, text="Capture board", command=self._capture).grid(row=0, column=0, **pad)
+        self.cap_status = ttk.Label(cap, text="", foreground="#070")
+        self.cap_status.grid(row=0, column=1, sticky="w", **pad)
+        ttk.Label(cap, text="Grabs the Judgment window (config/regions.json) and saves the frame "
+                  "+ 81 board cells to data/shogi/. Calibrate the board box first: "
+                  "calibrate mark --game shogi.", foreground="#888", font=("Segoe UI", 8),
+                  wraplength=500).grid(row=1, column=0, columnspan=2, sticky="w", padx=8)
+
         bar = ttk.Frame(parent)
-        bar.grid(row=3, column=0, sticky="w", **pad)
+        bar.grid(row=4, column=0, sticky="w", **pad)
         ttk.Button(bar, text="Advise", command=self._advise).grid(row=0, column=0, **pad)
         self.status = ttk.Label(bar, text="", foreground="#070")
         self.status.grid(row=0, column=1, sticky="w", **pad)
 
         self.out = tk.Text(parent, height=16, width=46, wrap="none", bg="#0a0a0a",
                            fg="#d8d8d8", font=("Consolas", 10), state="disabled")
-        self.out.grid(row=4, column=0, sticky="nsew", **pad)
-        parent.rowconfigure(4, weight=1)
+        self.out.grid(row=5, column=0, sticky="nsew", **pad)
+        parent.rowconfigure(5, weight=1)
 
     # ----------------------------------------------------------------- logic ---
     def _browse_engine(self):
@@ -210,6 +220,61 @@ class ShogiTab:
         self._set_output(text)
         self.status.configure(text="" if ok else "engine error",
                               foreground="#070" if ok else "#a00")
+
+    def _capture(self):
+        """Grab the game window and save the frame (+ 81 board cells if the board
+        ROI is calibrated). This is the bootstrap for piece recognition: capture a
+        real board, then label the cells into a template library."""
+        import time
+
+        try:
+            import cv2
+            from .live import grab_frame, load_config
+            from ..capture.screen import ScreenGrabber
+            from ..vision.shogi_board import occupancy_grid, save_cells
+        except Exception as e:                       # noqa: BLE001
+            self.cap_status.configure(text=f"capture deps missing: {e}", foreground="#a00")
+            return
+        cfg_path = self._root_dir / "config" / "regions.json"
+        if not cfg_path.exists():
+            self.cap_status.configure(text="no config/regions.json — calibrate first",
+                                      foreground="#a00")
+            return
+        try:
+            cfg = load_config(str(cfg_path))
+            with ScreenGrabber(monitor=cfg.get("monitor", 1)) as g:
+                frame = grab_frame(g, cfg)
+        except Exception as e:                       # noqa: BLE001
+            self.cap_status.configure(text=f"grab failed: {e}", foreground="#a00")
+            return
+        if frame is None or getattr(frame, "size", 0) == 0:
+            win = cfg.get("window")
+            self.cap_status.configure(
+                text=(f"'{win}' window not found — open Judgment" if win else "no frame"),
+                foreground="#a00")
+            return
+
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        out = self._root_dir / "data" / "shogi"
+        (out / "frames").mkdir(parents=True, exist_ok=True)
+        fpath = out / "frames" / f"{ts}.png"
+        cv2.imwrite(str(fpath), frame)
+        board = (cfg.get("shogi") or {}).get("board")
+        if not board or list(board) == [0, 0, 0, 0]:
+            self.cap_status.configure(text=f"saved frame; calibrate the board box next",
+                                      foreground="#070")
+            self._set_output(f"Saved {frame.shape[1]}x{frame.shape[0]} frame:\n{fpath}\n\n"
+                             f"Next: calibrate mark --game shogi --image \"{fpath}\"")
+            return
+        paths = save_cells(frame, board, str(out / "cells" / ts))
+        occ = occupancy_grid(frame, board)
+        n = sum(v for row in occ for v in row)
+        self.cap_status.configure(text=f"saved frame + {len(paths)} cells ({n} occupied)",
+                                  foreground="#070")
+        grid_txt = "\n".join("".join("#" if v else "." for v in row) for row in occ)
+        self._set_output(f"Saved frame + 81 cells -> data/shogi/cells/{ts}/\n\n"
+                         f"occupancy (# = piece):\n{grid_txt}\n\n"
+                         f"Next: label these cells into a piece template library to read SFEN.")
 
     def close(self):
         """Shut the engine down (called when the launcher quits)."""

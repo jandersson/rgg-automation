@@ -155,13 +155,47 @@ process, `tests/_mock_usi.py`, so it runs with no real binary).
 
 ---
 
-## 7. Roadmap (deferred)
+## 7. Vision — capturing the board
 
-1. **Pin a default engine** — bundle/configure a known-good USI binary + document
-   the install, then store the path in config so `--engine` is optional.
-2. **Vision** — read the 9×9 board + pieces in hand off screen into SFEN. Flat
-   sprites on a fixed grid → template-matchable, but more piece classes than
-   mahjong and **orientation matters** (pieces point toward their owner).
+Capture reuses the shared layer (`capture/screen.py` + the Win32 window finder),
+so it grabs the Judgment window exactly like poker/blackjack. What's shogi-specific
+is in `vision/shogi_board.py`:
+
+- **Geometry** — one board ROI `[left, top, w, h]` (the 9×9 grid) splits evenly
+  into 81 cell rects. Files 9→1 left→right, ranks a→i top→bottom = SFEN order
+  **when you (sente) sit at the bottom**; set `flip=True` if you play gote.
+- **Occupancy** — a per-cell contrast heuristic ("is a piece here") for cropping
+  pieces and as a sanity layer.
+- **SFEN assembly** — `grid_to_sfen(grid, side, hands)` turns a 9×9 grid of piece
+  codes into an SFEN the advisor accepts.
+- **`ShogiBoardReader`** — frame → grid → SFEN, with a pluggable `recognizer`.
+
+**One-time calibration** (needs a shogi frame on screen, ~2 min):
+
+```
+calibrate mark --game shogi --window Judgment        # drag a box around the 9x9 grid
+#   or, on a saved screenshot (avoids the pause-on-focus-loss):
+calibrate mark --game shogi --image data/shogi/frames/<ts>.png
+```
+
+This writes `shogi.board` into `config/regions.json`. Then the launcher's **Shogi
+tab → Capture board** grabs the window, saves the frame to `data/shogi/frames/`
+and the 81 cell crops to `data/shogi/cells/<ts>/`, and shows an occupancy map.
+
+**What's left for a live read: piece recognition.** Reading *which* piece (and
+whose — sente vs gote pieces are rotated 180°) needs a template library built from
+real captured cells. That's why Capture saves the cells: label them, build the
+templates, plug a `recognizer` into `ShogiBoardReader`, and the same path yields a
+full SFEN → instant best-move/mate. Flat sprites on a fixed grid make this
+template-matchable; there are just more classes than the card games (14 piece
+kinds × promoted × 2 orientations).
+
+## 8. Roadmap (deferred)
+
+1. **Piece recognition** — template library from captured cells → `recognizer` →
+   live SFEN (the remaining vision step; everything else is in place).
+2. **Pieces in hand (komadai)** — read the two trays so dropped-piece advice is
+   exact; the calibration already optionally boxes them.
 3. **Overlay** — float the recommended move over the game like the poker launcher.
 4. **Puzzle Shogi UX** — feed the puzzle's piece set + move limit straight to the
    mate solver and show the full line.
