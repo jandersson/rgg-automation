@@ -182,20 +182,39 @@ This writes `shogi.board` into `config/regions.json`. Then the launcher's **Shog
 tab → Capture board** grabs the window, saves the frame to `data/shogi/frames/`
 and the 81 cell crops to `data/shogi/cells/<ts>/`, and shows an occupancy map.
 
-**What's left for a live read: piece recognition.** Reading *which* piece (and
-whose — sente vs gote pieces are rotated 180°) needs a template library built from
-real captured cells. That's why Capture saves the cells: label them, build the
-templates, plug a `recognizer` into `ShogiBoardReader`, and the same path yields a
-full SFEN → instant best-move/mate. Flat sprites on a fixed grid make this
-template-matchable; there are just more classes than the card games (14 piece
-kinds × promoted × 2 orientations).
+### Piece recognition (working)
+
+`vision/shogi_pieces.py` reads *which* piece and *whose*. It's **template
+matching, bootstrapped from the opening**: the opening layout is fixed, so a
+capture of it auto-labels every piece — `build_templates()` crops each cell and
+saves it as that piece's template. Owner is baked into the template (sente
+upright, gote rotated 180°, and the two king glyphs 王/玉), so a match yields the
+piece *and* its side with no rotation logic. `PieceRecognizer.classify` returns a
+code, `""` (empty), or `None` (uncertain — unknown glyph or hand-obscured).
+Validated: templates from one capture read a *different* capture back to the exact
+opening SFEN.
+
+**The hand cursor.** The player's pointer hand roams the board and covers pieces;
+those cells read `None`. `StableBoardReader` keeps a running board where a `None`
+cell **retains its prior value**, so the hand never wipes pieces — and successive
+captures (as the hand moves) fill in whatever it was covering. Shogi changes one
+move at a time, so the model stays correct.
+
+**Live flow:** with the Shogi tab selected and Judgment focused, press the R4
+paddle (or the button) → capture → board read into the SFEN field → best move
+shown. *New game (reset)* clears the persistent board. *Promoted pieces* and
+*pieces-in-hand* aren't in the opening — capture a mid-game board and
+`add_templates()` extends the library.
 
 ## 8. Roadmap (deferred)
 
-1. **Piece recognition** — template library from captured cells → `recognizer` →
-   live SFEN (the remaining vision step; everything else is in place).
-2. **Pieces in hand (komadai)** — read the two trays so dropped-piece advice is
-   exact; the calibration already optionally boxes them.
-3. **Overlay** — float the recommended move over the game like the poker launcher.
-4. **Puzzle Shogi UX** — feed the puzzle's piece set + move limit straight to the
-   mate solver and show the full line.
+1. **Promoted pieces + komadai** — `add_templates` from a mid-game capture for the
+   promoted set; read the two hand trays so dropped-piece advice is exact.
+2. **Explicit hand detector** — `None`+persistence already survives the hand;
+   a skin/region detector (tuned on a frame with the hand over a piece) could mark
+   obscured cells more eagerly. Wood is warm-toned, so it needs real data to tune.
+3. **Continuous live read** — a periodic loop (like poker's tick) updating the
+   board + advice every second, instead of per-capture.
+4. **Overlay** — float the recommended move over the game.
+5. **Puzzle Shogi UX** — feed the puzzle's piece set + move limit to the mate
+   solver and show the full line.
