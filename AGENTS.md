@@ -12,6 +12,7 @@ Everything uses `uv`. Run from the `judgment/` directory:
 - Launch the poker app (GUI): `uv run python -m judgment_assist.app.launcher`
 - Standalone live overlay: `uv run python -m judgment_assist.app.live poker`
 - Manual advice (no calibration): `uv run python -m judgment_assist.app.cli poker --hole "Ah Kh" --board "Qh 7h 2h" --opp 2`
+- Mahjong efficiency advisor (brains-only, no capture): `uv run python -m judgment_assist.app.cli mahjong --hand "56m 99m 456p 789p 123s 1z"`
 
 ## Conventions
 
@@ -31,5 +32,6 @@ Everything uses `uv`. Run from the `judgment/` directory:
 ## Docs
 
 - `judgment/POKER.md` — poker track status (what works, what doesn't, the launcher).
+- `judgment/MAHJONG.md` — Mahjong (Riichi) track: rules primer + the shanten/ukeire efficiency advisor (Phase 0, brains-only).
 - `judgment/ARCHITECTURE.md` — capture → vision → state → advisor → overlay pipeline.
 - `docs/detection.md` — how every detection mechanism works (template/HOG/CNN/transfer/leakage); rendered on GitHub Pages.

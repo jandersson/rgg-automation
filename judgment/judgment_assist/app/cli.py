@@ -17,6 +17,10 @@ from ..cards import parse_cards, cards_str, RANK_TO_INT, INT_TO_RANK
 from ..blackjack.engine import BlackjackAdvisor, Rules
 from ..blackjack.strategy import hand_total
 from ..poker.advisor import advise
+from ..mahjong.tiles import parse_hand, format_hand, hand_size
+from ..mahjong.shanten import shanten
+from ..mahjong.efficiency import discard_options, format_options, ukeire
+from ..mahjong.tiles import tile_name
 
 
 # ---------------------------------------------------------------- blackjack ---
@@ -119,6 +123,52 @@ def run_poker(a):
             print("  error:", e)
 
 
+# ------------------------------------------------------------------ mahjong ---
+def _show_mahjong(spec, seen_spec=None):
+    counts = parse_hand(spec)
+    seen = parse_hand(seen_spec) if seen_spec else None
+    n = hand_size(counts)
+    print(f"  hand [{format_hand(counts)}]  ({n} tiles)")
+    if n % 3 == 2:  # a 14-tile decision: rank the discards
+        opts = discard_options(counts, seen)
+        best = opts[0]
+        verdict = "WIN — tsumo!" if best["shanten"] < 0 else f"discard {tile_name(best['tile'])}"
+        print(f"  -> {verdict}")
+        print(format_options(opts))
+    else:           # a 13-tile hand: report shanten + what improves it
+        sh = shanten(counts)
+        state = "WIN" if sh < 0 else "tenpai" if sh == 0 else f"{sh}-shanten"
+        print(f"  {state}")
+        if sh >= 0:
+            accepts, total = ukeire(counts, seen)
+            tiles = " ".join(f"{tile_name(t)}({k})" for t, k in accepts) or "—"
+            print(f"  ukeire {total}  [{tiles}]")
+
+
+def run_mahjong(a):
+    if a.hand:
+        _show_mahjong(a.hand, a.seen)
+        return
+    print("Mahjong efficiency advisor. Type a hand in riichi notation:")
+    print("  e.g.  123m 456m 789m 123p 99s    (14 tiles -> best discard;")
+    print("        13 tiles -> shanten + ukeire). 'seen <tiles>' marks dead tiles.")
+    seen = None
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        if line in ("quit", "exit", "q"):
+            break
+        if line.startswith("seen "):
+            seen = line[5:]
+            print(f"  marking seen: {format_hand(parse_hand(seen))}")
+            continue
+        try:
+            _show_mahjong(line, seen)
+        except Exception as e:  # noqa: BLE001 - keep the REPL alive on bad input
+            print("  error:", e)
+
+
 # --------------------------------------------------------------------- main ---
 def build_parser():
     p = argparse.ArgumentParser(prog="judgment-assist")
@@ -145,6 +195,11 @@ def build_parser():
     pk.add_argument("--iters", type=int, default=20000)
     pk.add_argument("--seed", type=int, default=None)
     pk.set_defaults(func=run_poker)
+
+    mj = sub.add_parser("mahjong", help="riichi shanten/ukeire efficiency advisor")
+    mj.add_argument("--hand", help="tiles in riichi notation, e.g. '123m 456m 789m 123p 99s'")
+    mj.add_argument("--seen", help="tiles dead elsewhere (discards/dora indicator) for honest ukeire")
+    mj.set_defaults(func=run_mahjong)
     return p
 
 
