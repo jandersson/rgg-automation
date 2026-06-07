@@ -99,6 +99,13 @@ uv run python -m judgment_assist.app.cli shogi --engine "C:\\path\\to\\engine.ex
 `best_move` always tries an exact forced mate first (cheap, tsume-style checking
 search), then asks the engine. Without an engine it still solves mates.
 
+**In the GUI launcher.** `uv run python -m judgment_assist.app.launcher` → the
+**Shogi** tab: paste an SFEN, optionally type moves, hit **Advise**. It prefills
+the engine path + think-time from `config/shogi.json`, runs the think on a worker
+thread (no freeze), and shows the board with the recommended move (forced-mate
+line, or the engine's pick). Untick *Use USI engine* to get forced-mate-only
+(Puzzle Shogi) with no binary.
+
 ---
 
 ## 5. The USI engine (verified: Fairy-Stockfish)

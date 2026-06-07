@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 from .labels_tab import LabelsTab
+from .shogi_tab import ShogiTab
 
 # Project root (judgment/) — two levels up from this file (app/ -> judgment_assist/
 # -> judgment/). Used as the child's cwd so the default relative paths in the
@@ -185,8 +186,10 @@ class LauncherApp:
         self.nb.grid(row=0, column=0, sticky="nsew")
         self.tab_play = ttk.Frame(self.nb)
         self.tab_labels = ttk.Frame(self.nb)
+        self.tab_shogi = ttk.Frame(self.nb)
         self.nb.add(self.tab_play, text="Play")
         self.nb.add(self.tab_labels, text="Labels")
+        self.nb.add(self.tab_shogi, text="Shogi")
 
         self.v = {
             "game": tk.StringVar(value=DEFAULTS["game"]),
@@ -323,6 +326,7 @@ class LauncherApp:
 
         self.labels = LabelsTab(self.tab_labels, tk, ttk, root, ROOT,
                                 lambda: self._sess, self._labels_config_path)
+        self.shogi = ShogiTab(self.tab_shogi, tk, ttk, root, ROOT)
 
         self.v["game"].trace_add("write", lambda *_: self._toggle())
         self.corr_mode.trace_add("write", lambda *_: self._show_corr_mode())
@@ -480,6 +484,7 @@ class LauncherApp:
         """Close the launcher and any overlays it started (don't leave them
         running headless)."""
         self._stop_session()
+        self.shogi.close()
         terminate_all(self.procs)
         self.root.destroy()
 

@@ -135,10 +135,10 @@ def _temp_lib(app, tmp):
     app.labels._reload_labels_list()
 
 
-def test_launcher_has_play_and_labels_tabs():
+def test_launcher_has_play_labels_and_shogi_tabs():
     root, app = _gui()
     try:
-        assert [app.nb.tab(t, "text") for t in app.nb.tabs()] == ["Play", "Labels"]
+        assert [app.nb.tab(t, "text") for t in app.nb.tabs()] == ["Play", "Labels", "Shogi"]
     finally:
         root.destroy()
 
