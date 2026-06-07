@@ -124,13 +124,23 @@ class ShogiTab:
 
         cap = ttk.LabelFrame(parent, text="Capture from game")
         cap.grid(row=3, column=0, sticky="ew", **pad)
-        ttk.Button(cap, text="Capture board", command=self._capture).grid(row=0, column=0, **pad)
+        ttk.Button(cap, text="Capture board (3s delay)", command=self._capture_delayed
+                   ).grid(row=0, column=0, **pad)
         self.cap_status = ttk.Label(cap, text="", foreground="#070")
         self.cap_status.grid(row=0, column=1, sticky="w", **pad)
-        ttk.Label(cap, text="Grabs the Judgment window (config/regions.json) and saves the frame "
-                  "+ 81 board cells to data/shogi/. Calibrate the board box first: "
-                  "calibrate mark --game shogi.", foreground="#888", font=("Segoe UI", 8),
-                  wraplength=500).grid(row=1, column=0, columnspan=2, sticky="w", padx=8)
+        ttk.Label(cap, text="Hotkey").grid(row=1, column=0, sticky="e", **pad)
+        self.capture_key = tk.StringVar(value="f9")
+        ttk.Entry(cap, textvariable=self.capture_key, width=8).grid(row=1, column=1, sticky="w")
+        ttk.Label(cap, text="Judgment PAUSES when it loses focus, so clicking this window "
+                  "grabs the paused screen. Fix: press the Hotkey (f13-f24/f9/home/... ; map a "
+                  "controller paddle to it) while the GAME is focused — instant, no pause. The "
+                  "button instead waits 3s so you can click back to the game. Calibrate the "
+                  "board box first: calibrate mark --game shogi.",
+                  foreground="#888", font=("Segoe UI", 8), wraplength=500
+                  ).grid(row=2, column=0, columnspan=2, sticky="w", padx=8)
+        self._cap_pollers = set()
+        self.capture_key.trace_add("write", lambda *_: self._install_capture_hotkey())
+        self._install_capture_hotkey()
 
         bar = ttk.Frame(parent)
         bar.grid(row=4, column=0, sticky="w", **pad)
@@ -221,15 +231,38 @@ class ShogiTab:
         self.status.configure(text="" if ok else "engine error",
                               foreground="#070" if ok else "#a00")
 
-    def _capture(self):
+    def _install_capture_hotkey(self):
+        """Poll a global key so Capture can fire while the *game* is focused (the
+        only way to grab a live, un-paused frame). Windows-only; one poller per VK,
+        reused if the key is re-entered."""
+        import os
+        if os.name != "nt":
+            return
+        from .live import _VK, _key_poller
+        vk = _VK.get(self.capture_key.get().strip().lower())
+        if vk is not None and vk not in self._cap_pollers:
+            self._cap_pollers.add(vk)
+            _key_poller(self.root, vk, self._do_capture)
+
+    def _capture_delayed(self, secs=3):
+        """Countdown then capture — gives you time to click back to the game so it
+        un-pauses before the grab. (The hotkey is the cleaner path.)"""
+        if secs <= 0:
+            self._do_capture()
+            return
+        self.cap_status.configure(text=f"capturing in {secs}s — click the game window now",
+                                  foreground="#888")
+        self.root.after(1000, lambda: self._capture_delayed(secs - 1))
+
+    def _do_capture(self):
         """Grab the game window and save the frame (+ 81 board cells if the board
-        ROI is calibrated). This is the bootstrap for piece recognition: capture a
-        real board, then label the cells into a template library."""
+        ROI is calibrated). Refuses a paused/dimmed grab. This is the bootstrap for
+        piece recognition: capture a real board, then label the cells."""
         import time
 
         try:
             import cv2
-            from .live import grab_frame, load_config
+            from .live import _screen_dimmed, grab_frame, load_config
             from ..capture.screen import ScreenGrabber
             from ..vision.shogi_board import occupancy_grid, save_cells
         except Exception as e:                       # noqa: BLE001
@@ -251,6 +284,11 @@ class ShogiTab:
             win = cfg.get("window")
             self.cap_status.configure(
                 text=(f"'{win}' window not found — open Judgment" if win else "no frame"),
+                foreground="#a00")
+            return
+        if _screen_dimmed(frame):
+            self.cap_status.configure(
+                text="screen looks paused/dimmed — keep Judgment focused (use the hotkey)",
                 foreground="#a00")
             return
 
