@@ -9,8 +9,8 @@ def test_read_hand_finds_a_pasted_piece():
     cv2 = pytest.importorskip("cv2")
     from judgment_assist.vision.shogi_hand import read_hand
 
-    tmpl = np.zeros((90, 80, 3), np.uint8); tmpl[20:70, 30:50] = 255   # distinct glyph
-    natives = {"P": cv2.cvtColor(tmpl, cv2.COLOR_BGR2GRAY)}
+    tmpl = np.zeros((90, 80, 3), np.uint8); tmpl[20:70, 30:50] = 255   # dark glyph w/ strokes
+    natives = {"P": [cv2.cvtColor(tmpl, cv2.COLOR_BGR2GRAY)]}          # list per code now
     tray = np.full((400, 300, 3), 180, np.uint8)
     tray[40:130, 30:110] = tmpl                                       # paste one piece
     assert read_hand(tray, [0, 0, 300, 400], natives, threshold=0.6) == {"P": 1}
@@ -21,9 +21,24 @@ def test_read_hand_empty_tray_is_empty():
     cv2 = pytest.importorskip("cv2")
     from judgment_assist.vision.shogi_hand import read_hand
     tmpl = np.zeros((90, 80, 3), np.uint8); tmpl[20:70, 30:50] = 255
-    natives = {"P": cv2.cvtColor(tmpl, cv2.COLOR_BGR2GRAY)}
-    blank = np.full((400, 300, 3), 180, np.uint8)
+    natives = {"P": [cv2.cvtColor(tmpl, cv2.COLOR_BGR2GRAY)]}
+    blank = np.full((400, 300, 3), 180, np.uint8)                     # flat wood, no glyph
     assert read_hand(blank, [0, 0, 300, 400], natives, threshold=0.6) == {}
+
+
+def test_load_native_templates_excludes_kings_and_promoted(tmp_path):
+    import json
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from judgment_assist.vision.shogi_hand import load_native_templates
+    from judgment_assist.vision.shogi_pieces import MANIFEST
+    blank = np.full((90, 80, 3), 120, np.uint8)
+    man = {}
+    for stem, code in [("b_S.png", "S"), ("b_K.png", "K"), ("prom_b_R.png", "+R")]:
+        cv2.imwrite(str(tmp_path / stem), blank); man[stem] = code
+    json.dump(man, open(tmp_path / MANIFEST, "w"))
+    nat = load_native_templates(str(tmp_path), "b")
+    assert set(nat) == {"S"}                       # K and +R excluded (not droppable)
 
 
 def test_read_hands_runs_on_a_real_frame():
