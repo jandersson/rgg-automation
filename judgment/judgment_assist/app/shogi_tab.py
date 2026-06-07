@@ -504,11 +504,12 @@ class ShogiTab:
         return self._board
 
     def _reset_board(self):
-        """Clear the persistent board (new game)."""
-        if self._board is not None:
-            self._board.reset()
+        """Clear the persistent board AND drop the cached recognizer so any newly
+        added templates (e.g. a freshly labeled promoted piece) are reloaded on the
+        next capture — no launcher restart needed."""
+        self._board = None
         self._last_live_sfen = None
-        self.cap_status.configure(text="board reset — capture to read the new position",
+        self.cap_status.configure(text="board reset (templates reloaded) — capture to read",
                                   foreground="#070")
 
     # ------------------------------------------------------- live read loop ---
