@@ -145,12 +145,27 @@ def test_uncertain_cells_flags_occupied_but_unread():
     pytest.importorskip("numpy")
     pytest.importorskip("cv2")
 
-    class _NoneRec:
-        def classify(self, crop):
-            return None                  # never recognizes -> occupied cells are "unread"
+    from judgment_assist.vision.shogi_board import cell_score
+
+    class _NoneRec:                       # never recognizes -> occupied cells are "unread"
+        def classify_conf(self, crop):
+            return ("", 1.0) if cell_score(crop) < 16 else (None, 0.0)
 
     reader = ShogiBoardReader([0, 0, 90, 90], recognizer=_NoneRec())
     # _board_frame has one occupied cell (0,0); the rest are flat wood
+    assert reader.uncertain_cells(_board_frame()) == [(0, 0)]
+
+
+def test_uncertain_cells_flags_weak_force_match(tmp_path):
+    pytest.importorskip("numpy")
+
+    class _WeakRec:                       # returns a code but at low confidence
+        def classify_conf(self, crop):
+            from judgment_assist.vision.shogi_board import cell_score
+            return ("", 1.0) if cell_score(crop) < 16 else ("l", 0.45)
+
+    reader = ShogiBoardReader([0, 0, 90, 90], recognizer=_WeakRec())
+    # the one occupied cell force-matches 'l' at 0.45 (< 0.6) -> still flagged for review
     assert reader.uncertain_cells(_board_frame()) == [(0, 0)]
 
 

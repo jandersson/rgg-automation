@@ -157,13 +157,20 @@ class PieceRecognizer:
     def classify(self, crop):
         """``""`` empty, a piece code when confident, or ``None`` when uncertain
         (unknown glyph or hand-obscured)."""
+        return self.classify_conf(crop)[0]
+
+    def classify_conf(self, crop):
+        """``(code, score)``: ``code`` is ``""`` (empty), a piece when the best NCC
+        clears ``threshold``, else ``None``; ``score`` is that best NCC. The score
+        lets callers flag *force-matched* cells (a promoted piece with no template
+        matches an unpromoted one weakly) for review, not just ``None`` ones."""
         from .shogi_board import cell_score
         if cell_score(crop) < self.occ_threshold:
-            return ""
+            return "", 1.0
         best_code, best = None, -1.0
         c = _canon(crop)
         for code, t in self.templates.items():
             s = _ncc(c, t)
             if s > best:
                 best, best_code = s, code
-        return best_code if best >= self.threshold else None
+        return (best_code if best >= self.threshold else None), best

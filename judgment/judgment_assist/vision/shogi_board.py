@@ -196,17 +196,21 @@ class ShogiBoardReader:
     def read_sfen(self, frame, side="b", hands=None, move=1):
         return grid_to_sfen(self.read_grid(frame), side=side, hands=hands, move=move)
 
-    def uncertain_cells(self, frame, occ_threshold=16.0):
-        """Screen-coord ``(row, col)`` of cells the recognizer leaves as ``None``
-        but that look occupied — i.e. a glyph it has no template for (a promoted
-        piece) or the hand. These are the crops worth banking for labeling. No
-        ``flip`` is applied (screen coordinates, for saving cells)."""
+    def uncertain_cells(self, frame, conf_threshold=0.6):
+        """Screen-coord ``(row, col)`` of occupied cells the recognizer is unsure
+        about: either ``None`` (no template) **or** a weak/force-match below
+        ``conf_threshold`` — the latter is how an un-templated promoted piece looks
+        (it matches an unpromoted template ~0.4-0.5). These are the crops worth
+        banking for labeling. No ``flip`` (screen coordinates, for saving cells)."""
         if self.recognizer is None:
             return []
         out = []
         for r, row in enumerate(self.split(frame)):
             for c, crop in enumerate(row):
-                if self.recognizer.classify(crop) is None and cell_score(crop) >= occ_threshold:
+                code, score = self.recognizer.classify_conf(crop)
+                if code == "":
+                    continue                         # confidently empty
+                if code is None or score < conf_threshold:
                     out.append((r, c))
         return out
 
