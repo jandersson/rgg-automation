@@ -63,6 +63,102 @@ def format_advice(out):
     return out.get("note", "no advice available")
 
 
+# --- human-readable rendering -------------------------------------------------
+# Piece names by python-shogi piece_type.
+PIECE_NAMES = {
+    1: "Pawn", 2: "Lance", 3: "Knight", 4: "Silver", 5: "Gold",
+    6: "Bishop", 7: "Rook", 8: "King",
+    9: "+Pawn (Tokin)", 10: "+Lance", 11: "+Knight", 12: "+Silver",
+    13: "Horse (+Bishop)", 14: "Dragon (+Rook)",
+}
+_RANKS = "abcdefghi"
+
+
+def _sq_rc(sq):
+    """USI square '3i' -> (row, col) in the on-screen grid (row 0 = top, col 0 =
+    leftmost = file 9)."""
+    return _RANKS.index(sq[1]), 9 - int(sq[0])
+
+
+def _board_grid(sfen):
+    """SFEN board field -> 9×9 of piece codes ('' empty, '+R' promoted)."""
+    grid = []
+    for rank in sfen.split()[0].split("/"):
+        row, i = [], 0
+        while i < len(rank):
+            ch = rank[i]
+            if ch.isdigit():
+                row += [""] * int(ch); i += 1
+            elif ch == "+":
+                row.append("+" + rank[i + 1]); i += 2
+            else:
+                row.append(ch); i += 1
+        grid.append(row)
+    return grid
+
+
+def describe_move(sfen, usi):
+    """USI move -> plain English: 'Silver  3i → 4h', 'drop Gold → 5b'."""
+    import shogi
+    mv = shogi.Move.from_usi(usi)
+    if mv.drop_piece_type:
+        return f"drop {PIECE_NAMES.get(mv.drop_piece_type, 'piece')} → {usi.split('*')[1]}"
+    pc = shogi.Board(sfen).piece_at(mv.from_square)
+    name = PIECE_NAMES.get(pc.piece_type, "piece") if pc else "piece"
+    out = f"{name}  {usi[:2]} → {usi[2:4]}"
+    return out + "  (promote)" if mv.promotion else out
+
+
+def render_board(sfen, usi=None):
+    """ASCII board with file/rank labels; marks the move's From/To squares."""
+    grid = _board_grid(sfen)
+    frm = to = None
+    if usi:
+        if "*" in usi:
+            to = _sq_rc(usi.split("*")[1])
+        else:
+            frm, to = _sq_rc(usi[:2]), _sq_rc(usi[2:4])
+    lines = ["    9 8 7 6 5 4 3 2 1"]
+    for r in range(9):
+        cells = []
+        for c in range(9):
+            if (r, c) == frm:
+                cells.append("F")
+            elif (r, c) == to:
+                cells.append("T")
+            else:
+                v = grid[r][c]
+                cells.append(v[-1] if v else ".")   # promoted shown as its base letter
+        lines.append(f" {_RANKS[r]}  " + " ".join(cells))
+    return "\n".join(lines)
+
+
+def format_result(sfen, out):
+    """Full readable advice for the tab: labeled board + named move + legend."""
+    mv = out.get("move")
+    if not mv:
+        return render_board(sfen) + "\n\n" + out.get("note", "no advice available")
+    head = f"BEST MOVE:  {describe_move(sfen, mv)}"
+    if out.get("source") == "mate":
+        head += f"     (forced mate in {out['mate_in']})\nline:  " + " ".join(out["pv"])
+    else:
+        head += "     (engine)"
+    legend = ("\n  F = from, T = to.   CAPITALS = your pieces (bottom), "
+              "lowercase = opponent (top)."
+              "\n  files count right→left (1 = rightmost); ranks a (top)→i (bottom).")
+    return f"{render_board(sfen, mv)}\n\n{head}{legend}"
+
+
+def format_overlay_line(sfen, out):
+    """Compact advice for the floating overlay."""
+    mv = out.get("move")
+    if not mv:
+        return out.get("note", "no advice")
+    if out.get("source") == "mate":
+        return f"MATE in {out['mate_in']}:  {describe_move(sfen, mv)}"
+    return f"BEST:  {describe_move(sfen, mv)}"
+
+
 class ShogiTab:
     def __init__(self, parent, tk, ttk, root, root_dir):
         self.tk, self.ttk, self.root = tk, ttk, root
@@ -72,6 +168,11 @@ class ShogiTab:
         self._gen = 0                            # ignore results from superseded clicks
         self._board = None                       # StableBoardReader (lazy; needs templates)
         self._result_q = queue.Queue()           # worker -> main-thread results (tk isn't thread-safe)
+        self._overlay = None                     # floating SuggestionOverlay when Live read is on
+        self._live = False                       # continuous-read loop running?
+        self._grab = None                        # ScreenGrabber held for the loop
+        self._cfg_live = None                    # regions.json cached for the loop
+        self._last_live_sfen = None              # re-advise only when the board changes
         cfg_path, cfg_opts, cfg_movetime = load_engine_config(root_dir)
         self._engine_options = cfg_opts
         self._build(parent, cfg_path, cfg_movetime)
@@ -132,8 +233,11 @@ class ShogiTab:
                    ).grid(row=0, column=0, **pad)
         ttk.Button(cap, text="New game (reset)", command=self._reset_board
                    ).grid(row=0, column=2, **pad)
+        self.live_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(cap, text="Live read + overlay", variable=self.live_var,
+                        command=self._toggle_live).grid(row=0, column=3, **pad)
         self.cap_status = ttk.Label(cap, text="", foreground="#070")
-        self.cap_status.grid(row=0, column=3, sticky="w", **pad)
+        self.cap_status.grid(row=0, column=4, sticky="w", **pad)
         ttk.Label(cap, text="Extra key").grid(row=1, column=0, sticky="e", **pad)
         self.capture_key = tk.StringVar(value="")     # optional; the paddle is the main path
         ttk.Entry(cap, textvariable=self.capture_key, width=8).grid(row=1, column=1, sticky="w")
@@ -144,7 +248,7 @@ class ShogiTab:
                   "to the game. 'Extra key' is an optional separate key that captures from any "
                   "tab. Calibrate the board box first: calibrate mark --game shogi.",
                   foreground="#888", font=("Segoe UI", 8), wraplength=500
-                  ).grid(row=2, column=0, columnspan=4, sticky="w", padx=8)
+                  ).grid(row=2, column=0, columnspan=5, sticky="w", padx=8)
         self._cap_pollers = set()
         self.capture_key.trace_add("write", lambda *_: self._install_capture_hotkey())
         self._install_capture_hotkey()
@@ -219,17 +323,21 @@ class ShogiTab:
             self.status.configure(text="think/mate must be numbers", foreground="#a00")
             return
 
+        sfen = state.sfen
+
         def work():
             try:
                 engine = self._ensure_engine(engine_path) if use_engine else None
                 out = best_move(state, engine=engine, mate_moves=mate_moves,
                                 movetime_ms=movetime)
-                text = state.render() + "\n\n" + format_advice(out)
+                full = format_result(sfen, out)
+                compact = format_overlay_line(sfen, out)
                 ok = True
             except Exception as e:               # noqa: BLE001 - report, don't crash the GUI
-                text = state.render() + f"\n\nengine error: {e}"
+                full = render_board(sfen) + f"\n\nengine error: {e}"
+                compact = f"engine error: {e}"
                 ok = False
-            self._result_q.put((gen, text, ok))  # hand back to the main thread; never touch tk here
+            self._result_q.put((gen, full, compact, ok))  # hand back to main thread; no tk here
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -238,11 +346,16 @@ class ShogiTab:
         worker can't update widgets itself). Rescheduled for the tab's lifetime."""
         try:
             while True:
-                gen, text, ok = self._result_q.get_nowait()
+                gen, full, compact, ok = self._result_q.get_nowait()
                 if gen == self._gen:             # ignore superseded Advise calls
-                    self._set_output(text)
+                    self._set_output(full)
                     self.status.configure(text="" if ok else "engine error",
                                           foreground="#070" if ok else "#a00")
+                    if self._overlay is not None:
+                        try:
+                            self._overlay.update_text(compact)
+                        except Exception:        # noqa: BLE001
+                            pass
         except queue.Empty:
             pass
         try:
@@ -371,11 +484,103 @@ class ShogiTab:
         """Clear the persistent board (new game)."""
         if self._board is not None:
             self._board.reset()
+        self._last_live_sfen = None
         self.cap_status.configure(text="board reset — capture to read the new position",
                                   foreground="#070")
 
+    # ------------------------------------------------------- live read loop ---
+    LIVE_INTERVAL_MS = 1200
+
+    def _toggle_live(self):
+        if self.live_var.get():
+            self._start_live()
+        else:
+            self._stop_live()
+
+    def _start_live(self):
+        """Begin the continuous read loop + floating overlay. Needs a calibrated
+        board ROI and a template library; otherwise refuses and unticks."""
+        from .live import load_config
+        from ..capture.screen import ScreenGrabber
+        from .overlay import SuggestionOverlay
+        cfg_path = self._root_dir / "config" / "regions.json"
+        if not cfg_path.exists():
+            self._live_fail("no config/regions.json — calibrate first")
+            return
+        cfg = load_config(str(cfg_path))
+        board = (cfg.get("shogi") or {}).get("board")
+        if not board or list(board) == [0, 0, 0, 0]:
+            self._live_fail("board not calibrated — run calibrate mark --game shogi")
+            return
+        if self._ensure_board_reader(board) is None:
+            self._live_fail("no template library — capture an opening board first")
+            return
+        try:
+            self._grab = ScreenGrabber(monitor=cfg.get("monitor", 1)); self._grab.__enter__()
+        except Exception as e:                       # noqa: BLE001
+            self._live_fail(f"capture init failed: {e}")
+            return
+        self._cfg_live = cfg
+        self._last_live_sfen = None
+        self._overlay = SuggestionOverlay(master=self.root, input_enabled=False, x=40, y=40)
+        self._overlay.update_text("shogi: waiting for the board…")
+        self._live = True
+        self.cap_status.configure(text="live read ON — overlay floating over the game",
+                                  foreground="#070")
+        self.root.after(self.LIVE_INTERVAL_MS, self._live_tick)
+
+    def _live_fail(self, msg):
+        self.live_var.set(False)
+        self.cap_status.configure(text=msg, foreground="#a00")
+
+    def _live_tick(self):
+        if not self._live:
+            return
+        from .live import _screen_dimmed, grab_frame
+        from ..capture.window import is_foreground
+        try:
+            win = self._cfg_live.get("window")
+            frame = grab_frame(self._grab, self._cfg_live)
+            if frame is None or getattr(frame, "size", 0) == 0:
+                self._overlay.update_text("shogi: game window not found")
+            elif (win and not is_foreground(win)) or _screen_dimmed(frame):
+                pass                                 # not focused / paused -> keep last advice
+            else:
+                self._board.update(frame)
+                sfen = self._board.sfen()
+                if sfen != self._last_live_sfen:     # board changed -> recompute
+                    self._last_live_sfen = sfen
+                    self.sfen.set(sfen)
+                    self.moves.set("")
+                    self._advise()                   # threaded; result updates tab + overlay
+        except Exception as e:                       # noqa: BLE001 - keep the loop alive
+            try:
+                self._overlay.update_text(f"shogi: read hiccup ({e})")
+            except Exception:                        # noqa: BLE001
+                pass
+        finally:
+            if self._live:
+                self.root.after(self.LIVE_INTERVAL_MS, self._live_tick)
+
+    def _stop_live(self):
+        self._live = False
+        if self._grab is not None:
+            try:
+                self._grab.__exit__(None, None, None)
+            except Exception:                        # noqa: BLE001
+                pass
+            self._grab = None
+        if self._overlay is not None:
+            try:
+                self._overlay.close()
+            except Exception:                        # noqa: BLE001
+                pass
+            self._overlay = None
+        self.cap_status.configure(text="live read off", foreground="#070")
+
     def close(self):
-        """Shut the engine down (called when the launcher quits)."""
+        """Stop the live loop + overlay and shut the engine down (launcher quit)."""
+        self._stop_live()
         if self._engine is not None:
             try:
                 self._engine.close()

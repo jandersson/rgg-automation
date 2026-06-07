@@ -200,11 +200,23 @@ cell **retains its prior value**, so the hand never wipes pieces — and success
 captures (as the hand moves) fill in whatever it was covering. Shogi changes one
 move at a time, so the model stays correct.
 
-**Live flow:** with the Shogi tab selected and Judgment focused, press the R4
-paddle (or the button) → capture → board read into the SFEN field → best move
-shown. *New game (reset)* clears the persistent board. *Promoted pieces* and
+**Flows:**
+
+- **Per-capture** — Shogi tab selected, Judgment focused, press R4 (or the button)
+  → board read into the SFEN field → best move shown.
+- **Live read + overlay** — tick the *Live read + overlay* box: a floating box
+  sits over the game and the board is re-read every ~1.2s, re-advising only when
+  the position changes. It skips frames when the game isn't focused or is paused,
+  so it never reads a stale screen. Untick (or quit) to stop.
+
+*New game (reset)* clears the persistent board. *Promoted pieces* and
 *pieces-in-hand* aren't in the opening — capture a mid-game board and
 `add_templates()` extends the library.
+
+**Readable advice.** The advice names the piece and marks the move on a labelled
+board, e.g. `BEST MOVE: Silver 3i → 4h` with `F`/`T` markers and a legend
+(CAPITALS = your pieces; files count right→left, ranks a top→i bottom). The
+overlay shows the compact one-liner.
 
 ## 8. Roadmap (deferred)
 
@@ -213,8 +225,5 @@ shown. *New game (reset)* clears the persistent board. *Promoted pieces* and
 2. **Explicit hand detector** — `None`+persistence already survives the hand;
    a skin/region detector (tuned on a frame with the hand over a piece) could mark
    obscured cells more eagerly. Wood is warm-toned, so it needs real data to tune.
-3. **Continuous live read** — a periodic loop (like poker's tick) updating the
-   board + advice every second, instead of per-capture.
-4. **Overlay** — float the recommended move over the game.
-5. **Puzzle Shogi UX** — feed the puzzle's piece set + move limit to the mate
+3. **Puzzle Shogi UX** — feed the puzzle's piece set + move limit to the mate
    solver and show the full line.
