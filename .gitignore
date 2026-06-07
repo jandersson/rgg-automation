@@ -25,7 +25,10 @@ judgment/data/poker/
 judgment/data/poker_cards/
 judgment/data/poker_templates/
 judgment/data/poker_digits/
-judgment/data/shogi/
+# shogi: ignore the bulky captures (frames/cells/review) but TRACK the labelled
+# piece-template library so it survives a clean checkout / other machines.
+judgment/data/shogi/*
+!judgment/data/shogi/templates/
 
 # Shogi USI engine binaries (downloaded per-machine, not committed)
 judgment/engines/
