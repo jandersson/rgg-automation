@@ -21,6 +21,8 @@ from ..mahjong.tiles import parse_hand, format_hand, hand_size
 from ..mahjong.shanten import shanten
 from ..mahjong.efficiency import discard_options, format_options, ukeire
 from ..mahjong.tiles import tile_name
+from ..shogi.board import ShogiState
+from ..shogi.engine import UsiEngine, best_move as shogi_best_move
 
 
 # ---------------------------------------------------------------- blackjack ---
@@ -169,6 +171,65 @@ def run_mahjong(a):
             print("  error:", e)
 
 
+# -------------------------------------------------------------------- shogi ---
+def _show_shogi(state, engine, mate_moves, movetime):
+    print(state.render())
+    if state.is_game_over():
+        print("  game over")
+        return
+    out = shogi_best_move(state, engine=engine, mate_moves=mate_moves, movetime_ms=movetime)
+    if out["source"] == "mate":
+        print(f"  -> {out['move']}   (forced mate in {out['mate_in']}: {' '.join(out['pv'])})")
+    elif out["source"] == "engine":
+        print(f"  -> {out['move']}   (engine, {movetime} ms)")
+    else:
+        print(f"  -> {out['note']}")
+
+
+def run_shogi(a):
+    engine = None
+    if a.engine:
+        engine = UsiEngine(a.engine).start()
+    try:
+        state = ShogiState(a.sfen) if a.sfen else ShogiState()
+        if a.move:
+            for mv in a.move.replace(",", " ").split():
+                state.push_usi(mv)
+        if a.sfen or a.move:
+            _show_shogi(state, engine, a.mate, a.movetime)
+            return
+        print("Shogi advisor. Commands:")
+        print("  sfen <SFEN>     set the position      move <usi...>   play move(s)")
+        print("  go              (re)compute advice    show            print board")
+        print("  reset           opening position      quit")
+        state = ShogiState()
+        _show_shogi(state, engine, a.mate, a.movetime)
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            if line in ("quit", "exit", "q"):
+                break
+            try:
+                if line.startswith("sfen "):
+                    state = ShogiState(line[5:].strip())
+                elif line.startswith("move "):
+                    for mv in line[5:].replace(",", " ").split():
+                        state.push_usi(mv)
+                elif line in ("reset",):
+                    state = ShogiState()
+                elif line in ("show", "go"):
+                    pass
+                else:
+                    print("  ?  use: sfen / move / go / show / reset / quit"); continue
+                _show_shogi(state, engine, a.mate, a.movetime)
+            except Exception as e:  # noqa: BLE001 - keep the REPL alive
+                print("  error:", e)
+    finally:
+        if engine is not None:
+            engine.close()
+
+
 # --------------------------------------------------------------------- main ---
 def build_parser():
     p = argparse.ArgumentParser(prog="judgment-assist")
@@ -200,6 +261,14 @@ def build_parser():
     mj.add_argument("--hand", help="tiles in riichi notation, e.g. '123m 456m 789m 123p 99s'")
     mj.add_argument("--seen", help="tiles dead elsewhere (discards/dora indicator) for honest ukeire")
     mj.set_defaults(func=run_mahjong)
+
+    sg = sub.add_parser("shogi", help="shogi advisor: forced-mate solver + USI engine")
+    sg.add_argument("--sfen", help="position as SFEN (default: opening position)")
+    sg.add_argument("--move", help="USI move(s) to play from the position, e.g. '7g7f 3c3d'")
+    sg.add_argument("--engine", help="path to a USI engine binary for positional advice")
+    sg.add_argument("--mate", type=int, default=7, help="max forced-mate depth to search (attacker moves)")
+    sg.add_argument("--movetime", type=int, default=1000, help="engine think time per move (ms)")
+    sg.set_defaults(func=run_shogi)
     return p
 
 

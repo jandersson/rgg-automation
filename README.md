@@ -11,6 +11,6 @@ These are personal-use assistants for offline, single-player minigames.
 
 | Folder       | Status   | Notes |
 |--------------|----------|-------|
-| [`judgment/`](judgment/) | in progress | Poker (Texas Hold'em) + Blackjack first; Mahjong efficiency advisor (brains-only) |
+| [`judgment/`](judgment/) | in progress | Poker (Texas Hold'em) + Blackjack first; Mahjong efficiency advisor + Shogi (forced-mate + USI engine), brains-only |
 
 See [`judgment/README.md`](judgment/README.md) to get started.
